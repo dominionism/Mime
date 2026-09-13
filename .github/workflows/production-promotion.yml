@@ -1,0 +1,24 @@
+name: Production promotion
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  require-development:
+    name: Only development may promote
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify promotion source
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [[ "$HEAD_REPOSITORY" != "$REPOSITORY" || "$HEAD_BRANCH" != "development" ]]; then
+            echo "Production PRs must originate from this repository's development branch."
+            exit 1
+          fi
