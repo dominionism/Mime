@@ -45,19 +45,26 @@ enum AccessibilityAccess: Equatable {
     }
 }
 
-/// Reads current permission state without prompting the user.
+/// Reads permission state, and asks for camera access when the user has never been asked.
 @MainActor
 protocol PermissionStatusProviding {
     var cameraAccess: CameraAccess { get }
     var accessibilityAccess: AccessibilityAccess { get }
+    func requestCameraAccess() async -> CameraAccess
 }
 
 struct SystemPermissionStatus: PermissionStatusProviding {
+    private let camera = CameraPermissionController()
+
     var cameraAccess: CameraAccess {
-        CameraAccess(AVCaptureDevice.authorizationStatus(for: .video))
+        camera.access
     }
 
     var accessibilityAccess: AccessibilityAccess {
         AccessibilityAccess(isTrusted: AXIsProcessTrusted())
+    }
+
+    func requestCameraAccess() async -> CameraAccess {
+        await camera.requestAccessIfNeeded()
     }
 }
