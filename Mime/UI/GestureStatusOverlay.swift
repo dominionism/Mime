@@ -152,8 +152,8 @@ struct GestureStatusHUD: View {
     private var icon: String {
         if errorMessage != nil { return "⚠️" }
         switch model.gesturePhase {
-        case .listening: return "✋"
-        case .armed(_, let candidate, _): return candidate?.emoji ?? "✋"
+        case .listening: return "✊"
+        case .armed(_, let candidate, _): return candidate?.emoji ?? "✊"
         case .cooldown(let command, _): return command.emoji
         }
     }
@@ -162,7 +162,7 @@ struct GestureStatusHUD: View {
         if errorMessage != nil { return "Camera unavailable" }
         switch model.gesturePhase {
         case .listening(let progress):
-            return progress > 0 ? "Hold open palm…" : "Listening for wake"
+            return progress > 0 ? "Hold closed fist…" : "Listening for wake"
         case .armed(_, let candidate, _):
             return candidate.map { "Ready for \($0.name)" } ?? "Ready for a command"
         case .cooldown(let command, let secondsLeft):
@@ -176,13 +176,13 @@ struct GestureStatusHUD: View {
         case .listening(let progress):
             return progress > 0
                 ? "\(Int((progress * 100).rounded()))% · keep holding"
-                : "Hold ✋ for 0.6 seconds"
+                : "Hold ✊ for 0.6 seconds"
         case .armed(let secondsLeft, let candidate, let progress):
             let countdown = "\(Int(ceil(secondsLeft)))s left"
             if let candidate {
                 return "\(candidate.emoji) \(Int((progress * 100).rounded()))% · \(countdown)"
             }
-            return "Show a command pose · \(countdown)"
+            return "Show 1–5 fingers · \(countdown)"
         case .cooldown(let command, let secondsLeft):
             if secondsLeft > 0 {
                 return "Release \(command.name) · \(Int(ceil(secondsLeft)))s cooldown"

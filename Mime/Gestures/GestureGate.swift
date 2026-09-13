@@ -1,6 +1,6 @@
 /// What the safety gate is doing, for the status display.
 enum GestureGatePhase: Equatable, Sendable {
-    /// Waiting for an open palm. `wakeProgress` runs from 0 to 1 while a palm is held.
+    /// Waiting for a closed fist. `wakeProgress` runs from 0 to 1 while the fist is held.
     case listening(wakeProgress: Double)
     /// Awake and waiting for a command pose. `commandProgress` runs from 0 to 1 while `candidate` is held.
     case armed(secondsLeft: Double, candidate: GestureID?, commandProgress: Double)
@@ -10,9 +10,9 @@ enum GestureGatePhase: Equatable, Sendable {
 
 /// Turns a stream of pose classifications into deliberate commands.
 ///
-/// An open palm held for 0.6 seconds arms the gate for 3 seconds. A command pose held for 0.4 seconds while armed emits
+/// A closed fist held for 0.6 seconds arms the gate for 3 seconds. A command pose held for 0.4 seconds while armed emits
 /// that command once. The gate then cools down for 2 seconds and also waits until the pose has been released for
-/// 0.3 seconds before it listens for another open palm. A missing hand, an unrecognized pose, or a gap between samples
+/// 0.3 seconds before it listens for another closed fist. A missing hand, an unrecognized pose, or a gap between samples
 /// restarts whatever pose was being held.
 ///
 /// Time comes from each sample's timestamp, so the gate behaves the same in tests as it does with a live camera.
@@ -66,9 +66,9 @@ struct GestureGate {
 
         switch state {
         case .listening:
-            guard let hold, hold.pose == .openPalm, timestamp - hold.since >= Self.wakeHold else { return nil }
+            guard let hold, hold.pose.isWake, timestamp - hold.since >= Self.wakeHold else { return nil }
             state = .armed(until: timestamp + Self.armedDuration)
-            // A command has to be a new pose, not a continuation of the palm that woke the gate.
+            // A command has to be a new pose, not a continuation of the fist that woke the gate.
             self.hold = nil
             return nil
 
@@ -88,7 +88,7 @@ struct GestureGate {
             let releaseStart = isReleased ? (isContinuous ? releasedSince ?? timestamp : timestamp) : nil
             if let releaseStart, timestamp >= deadline, timestamp - releaseStart >= Self.releaseHold {
                 state = .listening
-                // A palm raised during the cooldown has to be held again once the gate is listening.
+                // A fist held during the cooldown has to be held again once the gate is listening.
                 hold = nil
             } else {
                 state = .cooldown(command: command, until: deadline, releasedSince: releaseStart)
@@ -105,7 +105,7 @@ struct GestureGate {
     private func currentPhase(at timestamp: Double) -> GestureGatePhase {
         switch state {
         case .listening:
-            guard let hold, hold.pose == .openPalm else { return .listening(wakeProgress: 0) }
+            guard let hold, hold.pose.isWake else { return .listening(wakeProgress: 0) }
             return .listening(wakeProgress: min((timestamp - hold.since) / Self.wakeHold, 1))
 
         case .armed(let deadline):

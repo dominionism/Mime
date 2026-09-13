@@ -9,21 +9,9 @@ private let placements = [
 ]
 
 struct CuratedGestureClassifierTests {
-    @Test(arguments: placements, [GestureID.openPalm, .fist, .vSign, .indexPoint])
-    func recognizesUprightPoses(placement: HandFixture, gesture: GestureID) {
-        let classification = CuratedGestureClassifier.classify(placement.sample(shape(for: gesture)))
-
-        #expect(classification?.pose == gesture)
-    }
-
-    @Test(arguments: [
-        HandFixture(rotation: .pi / 2),
-        HandFixture(chirality: .left, rotation: .pi / 2),
-        HandFixture(rotation: .pi / 2 + 0.3, scale: 0.15),
-        HandFixture(chirality: .left, rotation: .pi / 2 - 0.3, imageAspectRatio: 4.0 / 3.0),
-    ])
-    func recognizesThumbsUp(placement: HandFixture) {
-        #expect(CuratedGestureClassifier.classify(placement.sample(.thumbsUp))?.pose == .thumbsUp)
+    @Test(arguments: placements, GestureID.allCases)
+    func recognizesFingerCounts(placement: HandFixture, gesture: GestureID) {
+        #expect(CuratedGestureClassifier.classify(placement.sample(shape(for: gesture)))?.pose == gesture)
     }
 
     @Test(arguments: GestureID.allCases)
@@ -39,22 +27,13 @@ struct CuratedGestureClassifierTests {
         }
     }
 
-    @Test func thumbPointingDownIsNotAThumbsUp() throws {
+    @Test func theBackOfFiveFingersIsNotFiveFingers() throws {
         let classification = try #require(
-            CuratedGestureClassifier.classify(HandFixture(rotation: -.pi / 2).sample(.thumbsUp))
+            CuratedGestureClassifier.classify(HandFixture().sample(HandShape.fiveFingers.turnedAround))
         )
 
         #expect(classification.pose == nil)
-        #expect(classification.score(for: .thumbsUp) == 0)
-    }
-
-    @Test func backOfAnOpenHandIsNotAnOpenPalm() throws {
-        let classification = try #require(
-            CuratedGestureClassifier.classify(HandFixture().sample(HandShape.openPalm.turnedAround))
-        )
-
-        #expect(classification.pose == nil)
-        #expect(classification.score(for: .openPalm) < CuratedGestureClassifier.minimumScore)
+        #expect(classification.score(for: .fiveFingers) < CuratedGestureClassifier.minimumScore)
     }
 
     @Test func halfBentFingersAreTooAmbiguousToRecognize() throws {
@@ -64,13 +43,13 @@ struct CuratedGestureClassifierTests {
     }
 
     @Test func jointsAtTheConfidenceFloorStillCount() {
-        let sample = HandFixture(confidence: CuratedGestureClassifier.minimumJointConfidence).sample(.fist)
+        let sample = HandFixture(confidence: CuratedGestureClassifier.minimumJointConfidence).sample(.twoFingers)
 
-        #expect(CuratedGestureClassifier.classify(sample)?.pose == .fist)
+        #expect(CuratedGestureClassifier.classify(sample)?.pose == .twoFingers)
     }
 
     @Test func jointsBelowTheConfidenceFloorCountForNothing() throws {
-        let sample = HandFixture(confidence: CuratedGestureClassifier.minimumJointConfidence - 0.01).sample(.fist)
+        let sample = HandFixture(confidence: CuratedGestureClassifier.minimumJointConfidence - 0.01).sample(.twoFingers)
         let classification = try #require(CuratedGestureClassifier.classify(sample))
 
         #expect(classification.pose == nil)
@@ -78,13 +57,13 @@ struct CuratedGestureClassifierTests {
     }
 
     @Test func oneUncertainRequiredJointRejectsThePose() throws {
-        var sample = HandFixture().sample(.indexPoint)
+        var sample = HandFixture().sample(.oneFinger)
         sample.hand?.joints[.indexTip]?.confidence = 0.3
 
         let classification = try #require(CuratedGestureClassifier.classify(sample))
 
         #expect(classification.pose == nil)
-        #expect(classification.score(for: .indexPoint) == 0)
+        #expect(classification.score(for: .oneFinger) == 0)
     }
 
     @Test func noHandMeansNoClassification() {
@@ -92,29 +71,30 @@ struct CuratedGestureClassifierTests {
     }
 
     @Test func recognizesTheBestPoseAtTheScoreFloor() {
-        #expect(CuratedGestureClassifier.recognizedPose(in: [.fist: 0.85, .thumbsUp: 0.6]) == .fist)
+        #expect(CuratedGestureClassifier.recognizedPose(in: [.oneFinger: 0.85, .twoFingers: 0.6]) == .oneFinger)
     }
 
     @Test func rejectsABestPoseBelowTheScoreFloor() {
-        #expect(CuratedGestureClassifier.recognizedPose(in: [.fist: 0.84, .thumbsUp: 0]) == nil)
+        #expect(CuratedGestureClassifier.recognizedPose(in: [.oneFinger: 0.84, .twoFingers: 0]) == nil)
     }
 
     @Test func recognizesAPoseThatWinsByExactlyTheMargin() {
-        #expect(CuratedGestureClassifier.recognizedPose(in: [.vSign: 1, .openPalm: 0.85]) == .vSign)
+        #expect(CuratedGestureClassifier.recognizedPose(in: [.threeFingers: 1, .twoFingers: 0.85]) == .threeFingers)
     }
 
     @Test func rejectsPosesTooCloseToCall() {
-        #expect(CuratedGestureClassifier.recognizedPose(in: [.vSign: 0.95, .indexPoint: 0.85]) == nil)
-        #expect(CuratedGestureClassifier.recognizedPose(in: [.fist: 0.9, .thumbsUp: 0.9]) == nil)
+        #expect(CuratedGestureClassifier.recognizedPose(in: [.threeFingers: 0.95, .twoFingers: 0.85]) == nil)
+        #expect(CuratedGestureClassifier.recognizedPose(in: [.fist: 0.9, .oneFinger: 0.9]) == nil)
     }
 
     private func shape(for gesture: GestureID) -> HandShape {
         switch gesture {
-        case .openPalm: .openPalm
         case .fist: .fist
-        case .thumbsUp: .thumbsUp
-        case .vSign: .vSign
-        case .indexPoint: .indexPoint
+        case .oneFinger: .oneFinger
+        case .twoFingers: .twoFingers
+        case .threeFingers: .threeFingers
+        case .fourFingers: .fourFingers
+        case .fiveFingers: .fiveFingers
         }
     }
 }

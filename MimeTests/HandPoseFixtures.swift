@@ -15,28 +15,24 @@ struct HandShape: Sendable {
     }
 
     enum Thumb: Sendable {
-        /// Straight and spread away from the fingers, as in an open palm.
+        /// Straight and spread away from the fingers, as in the five-finger command.
         case spread
-        /// Straight and at a right angle to the palm axis, as in a thumbs-up.
+        /// Straight and at a right angle to the palm axis.
         case sideways
         /// Folded across the fingers, as in a fist.
         case tucked
     }
 
-    static let openPalm = HandShape(
+    static let fiveFingers = HandShape(
         index: .extended(degrees: 8), middle: .extended(degrees: 0), ring: .extended(degrees: -6),
         little: .extended(degrees: -14), thumb: .spread
     )
     static let fist = HandShape(index: .curled, middle: .curled, ring: .curled, little: .curled, thumb: .tucked)
-    /// The thumb points sideways in the hand frame, so place it with a quarter turn counterclockwise to point it up.
-    static let thumbsUp = HandShape(index: .curled, middle: .curled, ring: .curled, little: .curled, thumb: .sideways)
-    static let vSign = HandShape(
-        index: .extended(degrees: 15), middle: .extended(degrees: -12), ring: .curled, little: .curled, thumb: .tucked
-    )
-    static let indexPoint = HandShape(
-        index: .extended(degrees: 5), middle: .curled, ring: .curled, little: .curled, thumb: .tucked
-    )
-    /// Index and middle fingers bent halfway, somewhere between a fist and a V sign.
+    static let oneFinger = HandShape(index: .extended(degrees: 5), middle: .curled, ring: .curled, little: .curled, thumb: .tucked)
+    static let twoFingers = HandShape(index: .extended(degrees: 8), middle: .extended(degrees: -5), ring: .curled, little: .curled, thumb: .tucked)
+    static let threeFingers = HandShape(index: .extended(degrees: 8), middle: .extended(degrees: 0), ring: .extended(degrees: -7), little: .curled, thumb: .tucked)
+    static let fourFingers = HandShape(index: .extended(degrees: 8), middle: .extended(degrees: 0), ring: .extended(degrees: -6), little: .extended(degrees: -14), thumb: .tucked)
+    /// Index and middle fingers bent halfway, between distinct finger counts.
     static let halfBent = HandShape(index: .halfBent, middle: .halfBent, ring: .curled, little: .curled, thumb: .tucked)
 
     var points: [HandJoint: SIMD2<Double>]

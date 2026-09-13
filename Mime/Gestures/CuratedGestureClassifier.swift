@@ -13,9 +13,9 @@ struct PoseClassification: Equatable, Sendable {
     }
 }
 
-/// Recognizes Mime's five curated poses from finger geometry.
+/// Recognizes Mime's wake pose and five curated finger-count commands from finger geometry.
 ///
-/// Each pose is a set of requirements, such as "index finger extended" or "thumb points up", and each requirement
+/// Each pose is a set of requirements, such as "index finger extended" or "thumb tucked", and each requirement
 /// scores from 0 to 1. A pose scores as its weakest requirement, so every requirement must hold at once.
 enum CuratedGestureClassifier {
     /// A joint Vision is less confident about than this can't count toward any pose.
@@ -81,16 +81,18 @@ private struct HandMeasurements {
         guard point(.wrist) != nil, point(.middleMCP) != nil else { return 0 }
 
         let requirements: [Double?] = switch gesture {
-        case .openPalm:
-            [extended(.index), extended(.middle), extended(.ring), extended(.little), thumbExtended, palmFacesCamera]
         case .fist:
-            [curled(.index), curled(.middle), curled(.ring), curled(.little), thumbExtended.map { 1 - $0 }]
-        case .thumbsUp:
-            [curled(.index), curled(.middle), curled(.ring), curled(.little), thumbExtended, thumbPointsUp]
-        case .vSign:
-            [extended(.index), extended(.middle), curled(.ring), curled(.little), fingertipsSpread]
-        case .indexPoint:
-            [extended(.index), curled(.middle), curled(.ring), curled(.little)]
+            [curled(.index), curled(.middle), curled(.ring), curled(.little), thumbTucked]
+        case .oneFinger:
+            [extended(.index), curled(.middle), curled(.ring), curled(.little), thumbTucked]
+        case .twoFingers:
+            [extended(.index), extended(.middle), curled(.ring), curled(.little), thumbTucked]
+        case .threeFingers:
+            [extended(.index), extended(.middle), extended(.ring), curled(.little), thumbTucked]
+        case .fourFingers:
+            [extended(.index), extended(.middle), extended(.ring), extended(.little), thumbTucked]
+        case .fiveFingers:
+            [extended(.index), extended(.middle), extended(.ring), extended(.little), thumbExtended, palmFacesCamera]
         }
         return requirements.reduce(1) { min($0, $1 ?? 0) }
     }
@@ -121,6 +123,11 @@ private struct HandMeasurements {
         extended(finger).map { 1 - $0 }
     }
 
+    /// 1 when the thumb is folded into the palm.
+    private var thumbTucked: Double? {
+        thumbExtended.map { 1 - $0 }
+    }
+
     /// 1 for a straight thumb reaching away from the fingers, 0 for one folded across them.
     private var thumbExtended: Double? {
         guard let mp = point(.thumbMP), let ip = point(.thumbIP), let tip = point(.thumbTip),
@@ -133,12 +140,6 @@ private struct HandMeasurements {
         return min(reach, straightness)
     }
 
-    /// 1 when the thumb points straight up in the camera image, falling to 0 as it tilts 55° away.
-    private var thumbPointsUp: Double? {
-        guard let mp = point(.thumbMP), let tip = point(.thumbTip) else { return nil }
-        return ramp(cosine(tip - mp, hand.imageUp), from: cos(55 * .pi / 180), to: cos(30 * .pi / 180))
-    }
-
     /// 1 when the palm faces the camera, 0 when the hand is edge-on or shows its back.
     private var palmFacesCamera: Double? {
         guard let index = point(.indexMCP), let little = point(.littleMCP) else { return nil }
@@ -146,11 +147,6 @@ private struct HandMeasurements {
         return ramp(index.x - little.x, from: 0.1, to: 0.35)
     }
 
-    /// 1 when the index and middle fingertips are clearly apart, as in a V sign.
-    private var fingertipsSpread: Double? {
-        guard let index = point(.indexTip), let middle = point(.middleTip) else { return nil }
-        return ramp(simd_length(index - middle), from: 0.2, to: 0.4)
-    }
 }
 
 /// Maps `value` from 0 at `start` to 1 at `end`, clamped to `0...1`.

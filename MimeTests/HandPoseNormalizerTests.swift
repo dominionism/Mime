@@ -3,7 +3,7 @@ import Testing
 
 struct HandPoseNormalizerTests {
     @Test func putsTheWristAtTheOriginAndTheMiddleKnuckleStraightUp() throws {
-        let hand = try normalize(HandFixture(rotation: 0.7, scale: 0.3), .openPalm)
+        let hand = try normalize(HandFixture(rotation: 0.7, scale: 0.3), .fiveFingers)
 
         expectClose(hand.points[.wrist], SIMD2(0, 0))
         expectClose(hand.points[.middleMCP], SIMD2(0, 1))
@@ -18,16 +18,16 @@ struct HandPoseNormalizerTests {
         HandFixture(chirality: .left, rotation: 1.2, scale: 0.15, imageAspectRatio: 4.0 / 3.0),
     ])
     func recoversTheSameShapeWhereverTheHandIs(fixture: HandFixture) throws {
-        let hand = try normalize(fixture, .vSign)
+        let hand = try normalize(fixture, .twoFingers)
 
-        for (joint, point) in HandShape.vSign.points {
+        for (joint, point) in HandShape.twoFingers.points {
             expectClose(hand.points[joint], point)
         }
     }
 
     @Test func reportsWhichWayIsUpInTheImage() throws {
-        let upright = try normalize(HandFixture(), .openPalm)
-        let quarterTurn = try normalize(HandFixture(rotation: .pi / 2), .openPalm)
+        let upright = try normalize(HandFixture(), .fiveFingers)
+        let quarterTurn = try normalize(HandFixture(rotation: .pi / 2), .fiveFingers)
 
         expectClose(upright.imageUp, SIMD2(0, 1))
         expectClose(quarterTurn.imageUp, SIMD2(1, 0))
@@ -40,7 +40,7 @@ struct HandPoseNormalizerTests {
     }
 
     @Test func needsTheWristAndMiddleKnuckle() {
-        var hand = HandFixture().hand(.openPalm)
+        var hand = HandFixture().hand(.fiveFingers)
         hand.joints[.middleMCP] = nil
 
         #expect(HandPoseNormalizer.normalize(hand, imageAspectRatio: 16.0 / 9.0) == nil)

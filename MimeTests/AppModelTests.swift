@@ -28,12 +28,12 @@ struct AppModelTests {
 
         await model.toggleRecognition()
         for index in 0...20 {
-            tracking.send(HandFixture().sample(.openPalm, at: 1 + Double(index) / 32))
+            tracking.send(HandFixture().sample(.fist, at: 1 + Double(index) / 32))
             await Task.yield()
         }
         await allowSampleTaskToRun()
 
-        #expect(model.latestClassification?.pose == .openPalm)
+        #expect(model.latestClassification?.pose == .fist)
         #expect(model.gesturePhase.stage == .armed)
     }
 
@@ -42,10 +42,10 @@ struct AppModelTests {
         let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
 
         await model.setDiagnosticsActive(true)
-        tracking.send(HandFixture().sample(.openPalm, at: 1))
+        tracking.send(HandFixture().sample(.fiveFingers, at: 1))
         await allowSampleTaskToRun()
 
-        #expect(model.latestClassification?.pose == .openPalm)
+        #expect(model.latestClassification?.pose == .fiveFingers)
         #expect(model.gesturePhase == .listening(wakeProgress: 0))
     }
 
@@ -55,7 +55,7 @@ struct AppModelTests {
 
         await model.toggleRecognition()
         for index in 0...20 {
-            tracking.send(HandFixture().sample(.openPalm, at: 1 + Double(index) / 32))
+            tracking.send(HandFixture().sample(.fist, at: 1 + Double(index) / 32))
             await Task.yield()
         }
         await allowSampleTaskToRun()
@@ -154,6 +154,7 @@ private func allowSampleTaskToRun() async {
     for _ in 0..<8 {
         await Task.yield()
     }
+    try? await Task.sleep(for: .milliseconds(5))
 }
 
 private enum AppModelPhaseStage {
