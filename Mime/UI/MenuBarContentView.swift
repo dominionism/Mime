@@ -8,12 +8,20 @@ struct MenuBarContentView: View {
 
     var body: some View {
         Button(model.isRecognitionActive ? "Stop Recognition" : "Start Recognition") {
-            model.toggleRecognition()
+            Task { await model.toggleRecognition() }
         }
 
         Divider()
 
         Text("Camera: \(model.cameraAccess.label)")
+        if let cameraError = model.cameraError {
+            Text(cameraError.message)
+        }
+        if model.cameraAccess == .denied {
+            Button("Open Camera Privacy Settings…") {
+                NSWorkspace.shared.open(CameraPermissionController.privacySettingsURL)
+            }
+        }
         Text("Accessibility: \(model.accessibilityAccess.label)")
 
         Divider()
