@@ -27,10 +27,19 @@ final class FakePermissionStatus: PermissionStatusProviding {
 }
 
 final class FakeHandTracking: HandTracking {
-    let samples = AsyncStream<HandPoseSample> { _ in }
+    let samples: AsyncStream<HandPoseSample>
+    private let continuation: AsyncStream<HandPoseSample>.Continuation
     var startError: CameraCaptureError?
     private(set) var isRunning = false
     private(set) var startCount = 0
+
+    init() {
+        var streamContinuation: AsyncStream<HandPoseSample>.Continuation?
+        samples = AsyncStream { continuation in
+            streamContinuation = continuation
+        }
+        continuation = streamContinuation!
+    }
 
     func start() async throws {
         startCount += 1
@@ -42,5 +51,9 @@ final class FakeHandTracking: HandTracking {
 
     func stop() async {
         isRunning = false
+    }
+
+    func send(_ sample: HandPoseSample) {
+        continuation.yield(sample)
     }
 }

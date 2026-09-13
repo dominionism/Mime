@@ -22,6 +22,52 @@ struct AppModelTests {
         #expect(tracking.isRunning)
     }
 
+    @Test func recognitionClassifiesSamplesAndAdvancesTheSafetyGate() async {
+        let tracking = FakeHandTracking()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+
+        await model.toggleRecognition()
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.openPalm, at: 1 + Double(index) / 32))
+            await Task.yield()
+        }
+        await allowSampleTaskToRun()
+
+        #expect(model.latestClassification?.pose == .openPalm)
+        #expect(model.gesturePhase.stage == .armed)
+    }
+
+    @Test func diagnosticsClassifySamplesWithoutAdvancingTheSafetyGate() async {
+        let tracking = FakeHandTracking()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+
+        await model.setDiagnosticsActive(true)
+        tracking.send(HandFixture().sample(.openPalm, at: 1))
+        await allowSampleTaskToRun()
+
+        #expect(model.latestClassification?.pose == .openPalm)
+        #expect(model.gesturePhase == .listening(wakeProgress: 0))
+    }
+
+    @Test func stoppingRecognitionResetsTheSafetyGateAndClearsSamples() async {
+        let tracking = FakeHandTracking()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+
+        await model.toggleRecognition()
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.openPalm, at: 1 + Double(index) / 32))
+            await Task.yield()
+        }
+        await allowSampleTaskToRun()
+        #expect(model.gesturePhase.stage == .armed)
+
+        await model.toggleRecognition()
+
+        #expect(model.gesturePhase == .listening(wakeProgress: 0))
+        #expect(model.latestHandPose == nil)
+        #expect(model.latestClassification == nil)
+    }
+
     @Test func stoppingRecognitionTurnsOffTheCamera() async {
         let tracking = FakeHandTracking()
         let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
@@ -101,5 +147,25 @@ struct AppModelTests {
 
         #expect(model.cameraAccess == .authorized)
         #expect(model.accessibilityAccess == .allowed)
+    }
+}
+
+private func allowSampleTaskToRun() async {
+    for _ in 0..<8 {
+        await Task.yield()
+    }
+}
+
+private enum AppModelPhaseStage {
+    case listening, armed, cooldown
+}
+
+private extension GestureGatePhase {
+    var stage: AppModelPhaseStage {
+        switch self {
+        case .listening: .listening
+        case .armed: .armed
+        case .cooldown: .cooldown
+        }
     }
 }

@@ -4,6 +4,7 @@ import SwiftUI
 struct HandTrackingDiagnosticsView: View {
     let isActive: Bool
     let sample: HandPoseSample?
+    let classification: PoseClassification?
     let framesPerSecond: Double?
 
     var body: some View {
@@ -37,6 +38,23 @@ struct HandTrackingDiagnosticsView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            if isActive {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Pose scores")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(GestureID.allCases, id: \.rawValue) { gesture in
+                        PoseScoreRow(
+                            gesture: gesture,
+                            score: classification?.score(for: gesture) ?? 0,
+                            isRecognized: classification?.pose == gesture
+                        )
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
     }
 
@@ -46,6 +64,36 @@ struct HandTrackingDiagnosticsView: View {
         }
         let confidence = Int((hand.confidence * 100).rounded())
         return "\(hand.chirality.label) · \(confidence)% confidence"
+    }
+}
+
+private struct PoseScoreRow: View {
+    let gesture: GestureID
+    let score: Double
+    let isRecognized: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(gesture.emoji)
+                .frame(width: 22)
+            Text(gesture.name)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            ProgressView(value: score)
+                .frame(width: 74)
+            Text("\(Int((score * 100).rounded()))%")
+                .monospacedDigit()
+                .frame(width: 34, alignment: .trailing)
+        }
+        .font(.caption)
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background {
+            if isRecognized {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(.tint.opacity(0.14))
+            }
+        }
     }
 }
 

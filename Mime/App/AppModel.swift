@@ -9,6 +9,10 @@ final class AppModel {
     /// Whether Settings is showing the live hand-tracking skeleton.
     private(set) var isDiagnosticsActive = false
     private(set) var latestHandPose: HandPoseSample?
+    /// The newest classification is exposed for diagnostics and tuning; it never triggers an action by itself.
+    private(set) var latestClassification: PoseClassification?
+    /// The safety gate's current phase, including wake and command stabilization progress.
+    private(set) var gesturePhase = GestureGatePhase.listening(wakeProgress: 0)
     private(set) var trackingFramesPerSecond: Double?
     private(set) var cameraAccess: CameraAccess
     private(set) var accessibilityAccess: AccessibilityAccess
@@ -18,6 +22,7 @@ final class AppModel {
     @ObservationIgnored private let handTracking: any HandTracking
     @ObservationIgnored private var isCapturing = false
     @ObservationIgnored private var frameRateMeter = FrameRateMeter()
+    @ObservationIgnored private var gestureGate = GestureGate()
     @ObservationIgnored private var sampleTask: Task<Void, Never>?
     @ObservationIgnored private var menuTrackingObserver: (any NSObjectProtocol)?
 
@@ -64,6 +69,7 @@ final class AppModel {
             guard await obtainCameraAccess() else { return }
             isRecognitionActive = true
         }
+        resetGestureGate()
         await updateCapture()
     }
 
@@ -95,6 +101,7 @@ final class AppModel {
         guard shouldCapture else {
             await handTracking.stop()
             latestHandPose = nil
+            latestClassification = nil
             trackingFramesPerSecond = nil
             frameRateMeter = FrameRateMeter()
             return
@@ -107,6 +114,7 @@ final class AppModel {
             isCapturing = false
             isRecognitionActive = false
             isDiagnosticsActive = false
+            resetGestureGate()
             cameraError = error as? CameraCaptureError ?? .configurationFailed
         }
     }
@@ -114,7 +122,18 @@ final class AppModel {
     private func receive(_ sample: HandPoseSample) {
         guard isCapturing else { return }
         latestHandPose = sample
+        let classification = CuratedGestureClassifier.classify(sample)
+        latestClassification = classification
+        if isRecognitionActive {
+            _ = gestureGate.update(with: classification, at: sample.timestamp)
+            gesturePhase = gestureGate.phase
+        }
         frameRateMeter.record(sample.timestamp)
         trackingFramesPerSecond = frameRateMeter.framesPerSecond
+    }
+
+    private func resetGestureGate() {
+        gestureGate.reset()
+        gesturePhase = gestureGate.phase
     }
 }

@@ -18,6 +18,7 @@ struct SettingsView: View {
                 HandTrackingDiagnosticsView(
                     isActive: model.isDiagnosticsActive,
                     sample: model.latestHandPose,
+                    classification: model.latestClassification,
                     framesPerSecond: model.trackingFramesPerSecond
                 )
             }
