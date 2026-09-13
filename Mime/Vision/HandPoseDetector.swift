@@ -1,4 +1,5 @@
 import CoreMedia
+import CoreVideo
 import Vision
 
 /// Finds a hand in camera frames with Vision and publishes the newest result.
@@ -33,7 +34,11 @@ final class HandPoseDetector {
             hand = nil
         }
 
-        publish(HandPoseSample(timestamp: timestamp, hand: hand))
+        var sample = HandPoseSample(timestamp: timestamp, hand: hand)
+        if let image = sampleBuffer.imageBuffer, CVPixelBufferGetHeight(image) > 0 {
+            sample.imageAspectRatio = Double(CVPixelBufferGetWidth(image)) / Double(CVPixelBufferGetHeight(image))
+        }
+        publish(sample)
     }
 
     func publish(_ sample: HandPoseSample) {

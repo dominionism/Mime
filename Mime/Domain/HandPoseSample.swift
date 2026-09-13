@@ -40,4 +40,6 @@ struct HandPoseSample: Equatable, Sendable {
     var timestamp: Double
     /// The detected hand, or `nil` when no hand was found.
     var hand: DetectedHand?
+    /// The camera image's width divided by its height, which restores true proportions to normalized joint positions.
+    var imageAspectRatio = 16.0 / 9.0
 }
