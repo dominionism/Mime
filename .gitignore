@@ -1,0 +1,14 @@
+# Personal agent context (local only)
+Context/
+Memories/
+
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
