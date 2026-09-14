@@ -10,11 +10,11 @@ Mime is a menu-bar app that watches for deliberate hand poses through your Mac's
 ## How it works
 
 1. Turn on recognition from the menu bar.
-2. Hold an open palm toward the camera to wake Mime.
-3. Within a few seconds, show a command pose: fist, thumbs-up, V sign or pointing finger.
-4. Mime runs the action assigned to that pose.
+2. In Safe mode, hold a closed fist to wake Mime. Quick mode accepts a finger count directly.
+3. Show one through five fingers to run its assigned app.
+4. In Quick mode, swipe left or right to cycle frontmost apps. Pinch your thumb and index finger to send ⌘W to the active app.
 
-Waking Mime first keeps everyday movement, like typing, talking or reaching for a drink, from triggering anything. Either hand works.
+Safe mode keeps everyday movement, like typing, talking or reaching for a drink, from triggering anything. Either hand works. Motion shortcuts need Mime to be allowed under System Settings › Privacy & Security › Accessibility. ⌘W closes the active tab in a tab-aware app and the active window otherwise.
 
 ## Privacy
 
