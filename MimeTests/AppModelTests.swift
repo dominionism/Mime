@@ -237,10 +237,12 @@ struct AppModelTests {
     @Test func swipeRightCyclesToTheNextApplication() async {
         let tracking = FakeHandTracking()
         let actions = FakeSystemActionExecutor()
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
         let model = AppModel(
             permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
             handTracking: tracking,
-            configurationStore: FakeConfigurationStore(),
+            configurationStore: store,
             applicationLauncher: FakeApplicationLauncher(),
             systemActionExecutor: actions
         )
@@ -258,10 +260,12 @@ struct AppModelTests {
     @Test func pinchClosesTheActiveTabOrWindow() async {
         let tracking = FakeHandTracking()
         let actions = FakeSystemActionExecutor()
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
         let model = AppModel(
             permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
             handTracking: tracking,
-            configurationStore: FakeConfigurationStore(),
+            configurationStore: store,
             applicationLauncher: FakeApplicationLauncher(),
             systemActionExecutor: actions
         )
@@ -295,6 +299,29 @@ struct AppModelTests {
 
         #expect(model.acceptedCommandCount == 0)
         #expect(actions.actions == [.nextApplication])
+    }
+
+    @Test func safeMotionShortcutConsumesAnExistingWake() async {
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(
+            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
+            handTracking: tracking,
+            configurationStore: FakeConfigurationStore(),
+            applicationLauncher: FakeApplicationLauncher(),
+            systemActionExecutor: actions
+        )
+
+        await model.toggleRecognition()
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.fist, at: 1 + Double(index) / 32))
+        }
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fiveFingers, at: 1.7))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.85))
+        await allowSampleTaskToRun()
+
+        #expect(actions.actions == [.nextApplication])
+        #expect(model.gesturePhase.stage == .listening)
     }
 
     @Test func motionGesturesWaitForRecognitionInsteadOfDiagnostics() async {

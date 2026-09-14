@@ -231,12 +231,16 @@ final class AppModel {
         }
         if isRecognitionActive && !isEditingBindings {
             let motion = handMotionRecognizer.update(sample)
+            let wasArmed = gestureGate.isArmed
             if motion.suppressesStaticCommands {
-                gestureGate.reset()
+                gestureGate.cancelPendingCommand()
             }
-            if let gesture = motion.gesture {
+            let canRunMotion = activationMode == .quick || wasArmed
+            if let gesture = motion.gesture, canRunMotion {
                 lastMotionGesture = MotionGestureDetection(gesture: gesture, detectedAt: Date())
                 performSystemAction(for: gesture)
+                // A dynamic action consumes the current safe wake, so another action needs another wake.
+                gestureGate.reset()
             }
             if !motion.suppressesStaticCommands,
                let command = gestureGate.update(with: classification, at: sample.timestamp) {

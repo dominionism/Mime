@@ -44,6 +44,12 @@ struct GestureGate {
     private var hold: (pose: GestureID, since: Double)?
     private var lastTimestamp: Double?
 
+    /// Whether safe mode has accepted its wake pose and is waiting for a command.
+    var isArmed: Bool {
+        if case .armed = state { return true }
+        return false
+    }
+
     init(mode: GestureActivationMode = .wakeThenCommand) {
         self.mode = mode
     }
@@ -115,6 +121,14 @@ struct GestureGate {
     /// Returns to listening and forgets any held pose, as when recognition stops.
     mutating func reset() {
         self = GestureGate(mode: mode)
+    }
+
+    /// Cancels only the pose currently being stabilized, preserving a safe-mode armed window.
+    mutating func cancelPendingCommand() {
+        hold = nil
+        if let lastTimestamp {
+            phase = currentPhase(at: lastTimestamp)
+        }
     }
 
     private func currentPhase(at timestamp: Double) -> GestureGatePhase {
