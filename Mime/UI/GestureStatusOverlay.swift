@@ -33,6 +33,8 @@ final class GestureStatusOverlayController {
             _ = model.cameraError
             _ = model.latestClassification
             _ = model.lastAcceptedCommand
+            _ = model.lastMotionGesture
+            _ = model.systemActionStatus
             _ = model.applicationLaunchStatus
             _ = model.isEditingBindings
             _ = model.activationMode
@@ -197,6 +199,9 @@ struct GestureStatusHUD: View {
     private var detail: String {
         if let errorMessage { return errorMessage }
         if model.isEditingBindings { return "Recognition resumes after choosing"
+        }
+        if case .failed(_, let message) = model.systemActionStatus {
+            return message
         }
         switch model.gesturePhase {
         case .listening(let progress):
