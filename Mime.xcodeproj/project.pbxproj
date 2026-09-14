@@ -339,6 +339,7 @@
 				CODE_SIGN_ENTITLEMENTS = Mime/Mime.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
+				OTHER_CODE_SIGN_FLAGS = "-r $(SRCROOT)/Mime/Resources/Mime.codesign-requirements";
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
@@ -369,6 +370,7 @@
 				CODE_SIGN_ENTITLEMENTS = Mime/Mime.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
+				OTHER_CODE_SIGN_FLAGS = "-r $(SRCROOT)/Mime/Resources/Mime.codesign-requirements";
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
