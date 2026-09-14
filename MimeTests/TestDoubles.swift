@@ -1,3 +1,4 @@
+import Foundation
 @testable import Mime
 
 @MainActor
@@ -55,5 +56,50 @@ final class FakeHandTracking: HandTracking {
 
     func send(_ sample: HandPoseSample) {
         continuation.yield(sample)
+    }
+}
+
+@MainActor
+final class FakeConfigurationStore: ConfigurationStoring {
+    var configuration = Configuration()
+    var loadError: (any Error)?
+    var saveError: (any Error)?
+    private(set) var saveCount = 0
+
+    func load() throws -> Configuration {
+        if let loadError { throw loadError }
+        return configuration
+    }
+
+    func save(_ configuration: Configuration) throws {
+        if let saveError { throw saveError }
+        self.configuration = configuration
+        saveCount += 1
+    }
+
+    func reset() throws -> Configuration {
+        configuration = Configuration()
+        loadError = nil
+        return configuration
+    }
+}
+
+@MainActor
+final class FakeApplicationLauncher: ApplicationLaunching {
+    var error: (any Error)?
+    var waitsForCompletion = false
+    private(set) var applications: [ApplicationTarget] = []
+    private var completions: [CheckedContinuation<Void, any Error>] = []
+
+    func open(_ application: ApplicationTarget) async throws {
+        applications.append(application)
+        if let error { throw error }
+        if waitsForCompletion {
+            try await withCheckedThrowingContinuation { completions.append($0) }
+        }
+    }
+
+    func completeNext() {
+        completions.removeFirst().resume()
     }
 }

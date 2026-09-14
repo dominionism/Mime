@@ -19,6 +19,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            ApplicationBindingsView(model: model)
+
             Section("Hand Tracking") {
                 Toggle("Show hand tracking", isOn: diagnosticsBinding)
                 if let cameraError = model.cameraError {
@@ -39,7 +41,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 420)
+        .frame(width: 480, height: 680)
         .onAppear {
             model.refreshPermissions()
         }
@@ -59,13 +61,16 @@ struct SettingsView: View {
     }
 
     private var recognitionGuidance: String {
+        if model.isEditingBindings {
+            return "Recognition is paused while you choose an app."
+        }
         switch model.gesturePhase {
         case .listening(let progress):
-            progress > 0 ? "Keep holding your closed fist…" : "Hold a closed fist to wake Mime."
+            return progress > 0 ? "Keep holding your closed fist…" : "Hold a closed fist to wake Mime."
         case .armed:
-            "Ready: show 1–5 fingers and hold briefly."
+            return "Ready: show 1–5 fingers and hold briefly."
         case .cooldown(let command, _):
-            "Accepted \(command.name). You can lower your hand."
+            return "Accepted \(command.name). You can lower your hand."
         }
     }
 }

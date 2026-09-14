@@ -2,7 +2,7 @@
 ///
 /// A closed fist is reserved for waking Mime and can never be assigned an action. The five finger-count poses are
 /// commands, which keeps the vocabulary easy to remember and leaves room for custom static poses later.
-enum GestureID: String, CaseIterable, Sendable {
+enum GestureID: String, CaseIterable, Codable, Sendable {
     case fist
     case oneFinger
     case twoFingers

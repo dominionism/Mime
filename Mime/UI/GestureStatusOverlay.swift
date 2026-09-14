@@ -33,6 +33,8 @@ final class GestureStatusOverlayController {
             _ = model.cameraError
             _ = model.latestClassification
             _ = model.lastAcceptedCommand
+            _ = model.applicationLaunchStatus
+            _ = model.isEditingBindings
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -152,6 +154,11 @@ struct GestureStatusHUD: View {
 
     private var icon: String {
         if errorMessage != nil { return "⚠️" }
+        if model.isEditingBindings { return "⏸" }
+        if case .cooldown(_, let secondsLeft) = model.gesturePhase, secondsLeft > 0,
+           case .failed = model.applicationLaunchStatus {
+            return "⚠️"
+        }
         switch model.gesturePhase {
         case .listening: return "✊"
         case .armed(_, let candidate, _): return candidate?.emoji ?? "✊"
@@ -161,18 +168,28 @@ struct GestureStatusHUD: View {
 
     private var title: String {
         if errorMessage != nil { return "Camera unavailable" }
+        if model.isEditingBindings { return "Choosing an app" }
         switch model.gesturePhase {
         case .listening(let progress):
             return progress > 0 ? "Hold closed fist…" : "Listening for wake"
         case .armed(_, let candidate, _):
             return candidate.map { "Ready for \($0.name)" } ?? "Ready for a command"
         case .cooldown(let command, let secondsLeft):
-            return secondsLeft > 0 ? "Recognized \(command.name)" : "Release \(command.name)"
+            guard secondsLeft > 0 else { return "Release \(command.name)" }
+            switch model.applicationLaunchStatus {
+            case .idle: return "Recognized \(command.name)"
+            case .opening(let application): return "Opening \(application.name)…"
+            case .opened(let application): return "Opened \(application.name)"
+            case .failed(let application, _): return "Couldn’t open \(application.name)"
+            case .unassigned: return "No app assigned"
+            }
         }
     }
 
     private var detail: String {
         if let errorMessage { return errorMessage }
+        if model.isEditingBindings { return "Recognition resumes after choosing"
+        }
         switch model.gesturePhase {
         case .listening(let progress):
             if progress > 0 {
@@ -190,6 +207,11 @@ struct GestureStatusHUD: View {
             return "Show 1–5 fingers · \(countdown)"
         case .cooldown(let command, let secondsLeft):
             if secondsLeft > 0 {
+                switch model.applicationLaunchStatus {
+                case .failed: return "Check Settings · release your hand"
+                case .unassigned: return "Choose an app in Settings"
+                default: break
+                }
                 return "Release \(command.name) · \(Int(ceil(secondsLeft)))s cooldown"
             }
             return "Release fully to listen again"

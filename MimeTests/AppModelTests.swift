@@ -6,7 +6,7 @@ import Testing
 struct AppModelTests {
     @Test func recognitionStartsOff() {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         #expect(!model.isRecognitionActive)
         #expect(tracking.startCount == 0)
@@ -14,7 +14,7 @@ struct AppModelTests {
 
     @Test func startingRecognitionTurnsOnTheCamera() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
 
@@ -24,7 +24,7 @@ struct AppModelTests {
 
     @Test func recognitionClassifiesSamplesAndAdvancesTheSafetyGate() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
         for index in 0...20 {
@@ -39,7 +39,7 @@ struct AppModelTests {
 
     @Test func diagnosticsClassifySamplesWithoutAdvancingTheSafetyGate() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.setDiagnosticsActive(true)
         tracking.send(HandFixture().sample(.fiveFingers, at: 1))
@@ -54,7 +54,7 @@ struct AppModelTests {
 
     @Test func detectedPoseRemainsAfterHandLeavesViewAndCaptureStops() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.setDiagnosticsActive(true)
         tracking.send(HandFixture().sample(.oneFinger, at: 1))
@@ -75,7 +75,7 @@ struct AppModelTests {
 
     @Test func fingerPoseWithoutWakeIsSeenButNeverCountedAsACommand() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
         for index in 0...40 {
@@ -91,7 +91,7 @@ struct AppModelTests {
     @Test func acceptedCommandIsCountedOnceAndRemainsAfterReleaseAndRestart() async {
         let tracking = FakeHandTracking()
         let permissions = FakePermissionStatus(cameraAccess: .authorized)
-        let model = AppModel(permissions: permissions, handTracking: tracking)
+        let model = AppModel(permissions: permissions, handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
         for index in 0...20 {
@@ -128,7 +128,7 @@ struct AppModelTests {
         #expect(model.lastAcceptedCommand?.gesture == .twoFingers)
         #expect(model.acceptedCommandCount == 2)
 
-        let freshModel = AppModel(permissions: permissions, handTracking: FakeHandTracking())
+        let freshModel = AppModel(permissions: permissions, handTracking: FakeHandTracking(), configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
         #expect(freshModel.lastDetectedPose == nil)
         #expect(freshModel.lastAcceptedCommand == nil)
         #expect(freshModel.acceptedCommandCount == 0)
@@ -136,7 +136,7 @@ struct AppModelTests {
 
     @Test func stoppingRecognitionResetsTheSafetyGateAndClearsSamples() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
         for index in 0...20 {
@@ -155,7 +155,7 @@ struct AppModelTests {
 
     @Test func stoppingRecognitionTurnsOffTheCamera() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
         await model.toggleRecognition()
@@ -167,7 +167,7 @@ struct AppModelTests {
     @Test func firstStartAsksForCameraAccess() async {
         let permissions = FakePermissionStatus(cameraAccess: .notDetermined, cameraPromptAnswer: .authorized)
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: permissions, handTracking: tracking)
+        let model = AppModel(permissions: permissions, handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
 
@@ -179,7 +179,7 @@ struct AppModelTests {
     @Test func recognitionStaysOffWhenCameraAccessIsDenied() async {
         let permissions = FakePermissionStatus(cameraAccess: .notDetermined, cameraPromptAnswer: .denied)
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: permissions, handTracking: tracking)
+        let model = AppModel(permissions: permissions, handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
 
@@ -190,7 +190,7 @@ struct AppModelTests {
 
     @Test func diagnosticsKeepTheCameraOnAfterRecognitionStops() async {
         let tracking = FakeHandTracking()
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
         await model.setDiagnosticsActive(true)
@@ -204,7 +204,7 @@ struct AppModelTests {
     @Test func cameraFailureTurnsRecognitionOffAndExplainsWhy() async {
         let tracking = FakeHandTracking()
         tracking.startError = .noCamera
-        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         await model.toggleRecognition()
 
@@ -216,7 +216,7 @@ struct AppModelTests {
     @Test func readsPermissionsAtLaunch() {
         let permissions = FakePermissionStatus(cameraAccess: .denied, accessibilityAccess: .allowed)
 
-        let model = AppModel(permissions: permissions, handTracking: FakeHandTracking())
+        let model = AppModel(permissions: permissions, handTracking: FakeHandTracking(), configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
 
         #expect(model.cameraAccess == .denied)
         #expect(model.accessibilityAccess == .allowed)
@@ -224,7 +224,7 @@ struct AppModelTests {
 
     @Test func refreshesPermissionsWhenAMenuOpens() {
         let permissions = FakePermissionStatus()
-        let model = AppModel(permissions: permissions, handTracking: FakeHandTracking())
+        let model = AppModel(permissions: permissions, handTracking: FakeHandTracking(), configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
         permissions.cameraAccess = .authorized
         permissions.accessibilityAccess = .allowed
 

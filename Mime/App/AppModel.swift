@@ -15,6 +15,11 @@ final class AppModel {
     private(set) var lastDetectedPose: GestureDetection?
     private(set) var lastAcceptedCommand: GestureDetection?
     private(set) var acceptedCommandCount = 0
+    private(set) var configuration = Configuration()
+    private(set) var configurationError: String?
+    private(set) var canEditBindings = true
+    private(set) var isEditingBindings = false
+    private(set) var applicationLaunchStatus = ApplicationLaunchStatus.idle
     /// The safety gate's current phase, including wake and command stabilization progress.
     private(set) var gesturePhase = GestureGatePhase.listening(wakeProgress: 0)
     private(set) var trackingFramesPerSecond: Double?
@@ -24,6 +29,10 @@ final class AppModel {
 
     @ObservationIgnored private let permissions: any PermissionStatusProviding
     @ObservationIgnored private let handTracking: any HandTracking
+    @ObservationIgnored private let configurationStore: any ConfigurationStoring
+    @ObservationIgnored private let applicationLauncher: any ApplicationLaunching
+    @ObservationIgnored private var launchTask: Task<Void, Never>?
+    @ObservationIgnored private var launchID: UUID?
     @ObservationIgnored private var isCapturing = false
     @ObservationIgnored private var frameRateMeter = FrameRateMeter()
     @ObservationIgnored private var gestureGate = GestureGate()
@@ -32,12 +41,17 @@ final class AppModel {
 
     init(
         permissions: any PermissionStatusProviding = SystemPermissionStatus(),
-        handTracking: any HandTracking = CameraHandTracking()
+        handTracking: any HandTracking = CameraHandTracking(),
+        configurationStore: any ConfigurationStoring = ConfigurationStore(),
+        applicationLauncher: any ApplicationLaunching = ApplicationLauncher()
     ) {
         self.permissions = permissions
         self.handTracking = handTracking
+        self.configurationStore = configurationStore
+        self.applicationLauncher = applicationLauncher
         cameraAccess = permissions.cameraAccess
         accessibilityAccess = permissions.accessibilityAccess
+        reloadConfiguration()
 
         let samples = handTracking.samples
         sampleTask = Task { [weak self] in
@@ -61,6 +75,7 @@ final class AppModel {
 
     isolated deinit {
         sampleTask?.cancel()
+        launchTask?.cancel()
         if let menuTrackingObserver {
             NotificationCenter.default.removeObserver(menuTrackingObserver)
         }
@@ -69,6 +84,7 @@ final class AppModel {
     func toggleRecognition() async {
         if isRecognitionActive {
             isRecognitionActive = false
+            cancelPendingLaunch()
         } else {
             guard await obtainCameraAccess() else { return }
             isRecognitionActive = true
@@ -89,6 +105,60 @@ final class AppModel {
     func refreshPermissions() {
         cameraAccess = permissions.cameraAccess
         accessibilityAccess = permissions.accessibilityAccess
+    }
+
+    func reloadConfiguration() {
+        cancelPendingLaunch()
+        resetGestureGate()
+        do {
+            configuration = try configurationStore.load()
+            configurationError = nil
+            canEditBindings = true
+        } catch {
+            // Disable bindings when the saved configuration cannot be trusted; preserve the file for recovery.
+            configuration = Configuration()
+            configurationError = error.localizedDescription
+            canEditBindings = false
+        }
+    }
+
+    func resetConfiguration() {
+        cancelPendingLaunch()
+        resetGestureGate()
+        do {
+            configuration = try configurationStore.reset()
+            configurationError = nil
+            canEditBindings = true
+        } catch {
+            configurationError = error.localizedDescription
+        }
+    }
+
+    func setApplication(_ application: ApplicationTarget?, for gesture: GestureID) {
+        guard canEditBindings else { return }
+        cancelPendingLaunch()
+        resetGestureGate()
+        do {
+            var updated = configuration
+            try updated.setApplication(application, for: gesture)
+            try configurationStore.save(updated)
+            configuration = updated
+            configurationError = nil
+        } catch {
+            // Keep the last saved binding active if the replacement cannot be written.
+            configurationError = error.localizedDescription
+        }
+    }
+
+    func beginEditingBindings() {
+        isEditingBindings = true
+        cancelPendingLaunch()
+        resetGestureGate()
+    }
+
+    func endEditingBindings() {
+        isEditingBindings = false
+        resetGestureGate()
     }
 
     private func obtainCameraAccess() async -> Bool {
@@ -131,10 +201,11 @@ final class AppModel {
         if let pose = classification?.pose {
             lastDetectedPose = GestureDetection(gesture: pose, detectedAt: Date())
         }
-        if isRecognitionActive {
+        if isRecognitionActive && !isEditingBindings {
             if let command = gestureGate.update(with: classification, at: sample.timestamp) {
                 lastAcceptedCommand = GestureDetection(gesture: command, detectedAt: Date())
                 acceptedCommandCount += 1
+                openApplication(for: command)
             }
             gesturePhase = gestureGate.phase
         }
@@ -145,5 +216,41 @@ final class AppModel {
     private func resetGestureGate() {
         gestureGate.reset()
         gesturePhase = gestureGate.phase
+    }
+
+    private func openApplication(for gesture: GestureID) {
+        // Drop commands arriving during a launch rather than queuing a later surprise activation.
+        guard launchTask == nil, canEditBindings else { return }
+        guard let application = configuration.application(for: gesture) else {
+            applicationLaunchStatus = .unassigned(gesture)
+            return
+        }
+        let id = UUID()
+        launchID = id
+        applicationLaunchStatus = .opening(application)
+        launchTask = Task { [weak self] in
+            guard let self, !Task.isCancelled, self.isRecognitionActive, !self.isEditingBindings else { return }
+            do {
+                try await self.applicationLauncher.open(application)
+                guard !Task.isCancelled, self.launchID == id else { return }
+                self.applicationLaunchStatus = .opened(application)
+            } catch {
+                guard !Task.isCancelled, self.launchID == id else { return }
+                self.applicationLaunchStatus = .failed(application: application, message: error.localizedDescription)
+            }
+            if self.launchID == id {
+                self.launchTask = nil
+                self.launchID = nil
+            }
+        }
+    }
+
+    private func cancelPendingLaunch() {
+        launchTask?.cancel()
+        launchTask = nil
+        launchID = nil
+        if case .opening = applicationLaunchStatus {
+            applicationLaunchStatus = .idle
+        }
     }
 }
