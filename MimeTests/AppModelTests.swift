@@ -37,6 +37,21 @@ struct AppModelTests {
         #expect(model.gesturePhase.stage == .armed)
     }
 
+    @Test func aMovingWakeFistStillArmsSafeMode() async {
+        let tracking = FakeHandTracking()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
+
+        await model.toggleRecognition()
+        for index in 0...24 {
+            let wrist = SIMD2(0.45 + Double(index) * 0.008, 0.5)
+            tracking.send(HandFixture(wrist: wrist).sample(.fist, at: 1 + Double(index) / 32))
+        }
+        await allowSampleTaskToRun()
+
+        #expect(model.gesturePhase.stage == .armed)
+        #expect(model.lastMotionGesture == nil)
+    }
+
     @Test func diagnosticsClassifySamplesWithoutAdvancingTheSafetyGate() async {
         let tracking = FakeHandTracking()
         let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking, configurationStore: FakeConfigurationStore(), applicationLauncher: FakeApplicationLauncher())
@@ -257,48 +272,24 @@ struct AppModelTests {
         #expect(model.systemActionStatus == .performed(.swipeRight))
     }
 
-    @Test func pinchClosesTheActiveTabOrWindow() async {
-        let tracking = FakeHandTracking()
-        let actions = FakeSystemActionExecutor()
+    @Test func quickModeAcceptsAFingerCommandImmediately() async {
         let store = FakeConfigurationStore()
         store.configuration.activationMode = .quick
+        let tracking = FakeHandTracking()
+        let launcher = FakeApplicationLauncher()
         let model = AppModel(
             permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
             handTracking: tracking,
             configurationStore: store,
-            applicationLauncher: FakeApplicationLauncher(),
-            systemActionExecutor: actions
+            applicationLauncher: launcher
         )
 
         await model.toggleRecognition()
-        tracking.send(pinchSample(at: 1))
-        tracking.send(pinchSample(at: 1.10))
+        tracking.send(HandFixture().sample(.oneFinger, at: 1))
         await allowSampleTaskToRun()
 
-        #expect(actions.actions == [.closeCurrentTabOrWindow])
-        #expect(model.lastMotionGesture?.gesture == .pinch)
-    }
-
-    @Test func aSwipeCancelsAQuickStaticCommandWhileItIsMoving() async {
-        let store = FakeConfigurationStore()
-        store.configuration.activationMode = .quick
-        let tracking = FakeHandTracking()
-        let actions = FakeSystemActionExecutor()
-        let model = AppModel(
-            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
-            handTracking: tracking,
-            configurationStore: store,
-            applicationLauncher: FakeApplicationLauncher(),
-            systemActionExecutor: actions
-        )
-
-        await model.toggleRecognition()
-        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fiveFingers, at: 1))
-        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
-        await allowSampleTaskToRun()
-
-        #expect(model.acceptedCommandCount == 0)
-        #expect(actions.actions == [.nextApplication])
+        #expect(model.acceptedCommandCount == 1)
+        #expect(model.lastAcceptedCommand?.gesture == .oneFinger)
     }
 
     @Test func safeMotionShortcutConsumesAnExistingWake() async {
@@ -362,14 +353,6 @@ struct AppModelTests {
 
         #expect(actions.actions.isEmpty)
         #expect(model.lastMotionGesture == nil)
-    }
-
-    private func pinchSample(at timestamp: Double) -> HandPoseSample {
-        let fixture = HandFixture()
-        var hand = fixture.hand(.oneFinger)
-        let index = hand.joints[.indexTip]!
-        hand.joints[.thumbTip] = HandJointPosition(x: index.x + 0.02 * fixture.scale, y: index.y, confidence: 0.9)
-        return HandPoseSample(timestamp: timestamp, hand: hand, imageAspectRatio: fixture.imageAspectRatio)
     }
 }
 

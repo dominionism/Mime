@@ -4,13 +4,11 @@ import simd
 enum MotionGesture: String, CaseIterable, Codable, Equatable, Sendable {
     case swipeLeft
     case swipeRight
-    case pinch
 
     var name: String {
         switch self {
         case .swipeLeft: "Swipe left"
         case .swipeRight: "Swipe right"
-        case .pinch: "Pinch"
         }
     }
 
@@ -18,7 +16,6 @@ enum MotionGesture: String, CaseIterable, Codable, Equatable, Sendable {
         switch self {
         case .swipeLeft: "←"
         case .swipeRight: "→"
-        case .pinch: "🤏"
         }
     }
 }
@@ -26,27 +23,26 @@ enum MotionGesture: String, CaseIterable, Codable, Equatable, Sendable {
 /// The result of feeding one hand-pose sample into the motion recognizer.
 struct MotionRecognition: Equatable, Sendable {
     let gesture: MotionGesture?
-    /// A moving or pinching hand should not simultaneously complete a static finger-count command.
+    /// A moving hand should not simultaneously complete a static finger-count command.
     let suppressesStaticCommands: Bool
 }
 
-/// Recognizes short horizontal swipes and thumb-index pinches from raw hand landmarks.
+/// Recognizes short horizontal swipes from raw hand landmarks.
 ///
 /// Swipe positions stay in camera-image coordinates because the normalizer intentionally removes translation. The
-/// x-axis is mirrored into the user's view so a hand moving right produces `swipeRight` for either hand. Pinch
-/// distance is normalized by palm length, making the threshold independent of how close the hand is to the camera.
+/// x-axis is mirrored into the user's view so a hand moving right produces `swipeRight` for either hand.
 struct HandMotionRecognizer {
     static let minimumJointConfidence: Float = 0.5
-    static let minimumSwipeDistance = 0.18
-    static let maximumSwipeDuration = 0.65
-    static let minimumSwipeSpeed = 0.45
-    static let maximumVerticalDrift = 0.16
-    static let movementSuppressionDistance = 0.035
-    static let movementSuppressionSpeed = 0.35
-    static let pinchThreshold = 0.28
-    static let pinchReleaseThreshold = 0.40
-    static let pinchHold = 0.04
+    /// A hand-width swipe is easy to make in the camera preview without requiring an exaggerated throw.
+    static let minimumSwipeDistance = 0.12
+    static let maximumSwipeDuration = 0.8
+    static let minimumSwipeSpeed = 0.25
+    static let maximumVerticalDrift = 0.2
+    /// Movement cancels a pending finger-count command as soon as the hand leaves its still position.
+    static let movementSuppressionDistance = 0.018
+    static let movementSuppressionSpeed = 0.18
     static let swipeCooldown = 0.55
+    static let swipeRearmHold = 0.18
     static let maximumSampleGap = 0.25
 
     private struct Stroke {
@@ -54,12 +50,22 @@ struct HandMotionRecognizer {
         var since: Double
     }
 
+    private struct Movement {
+        var distance: Double
+        var speed: Double
+
+        var isMeaningful: Bool {
+            distance >= HandMotionRecognizer.movementSuppressionDistance
+                || speed >= HandMotionRecognizer.movementSuppressionSpeed
+        }
+    }
+
     private var lastTimestamp: Double?
     private var lastCenter: SIMD2<Double>?
     private var stroke: Stroke?
     private var swipeCooldownUntil: Double?
-    private var pinchSince: Double?
-    private var pinchLatched = false
+    private var swipeNeedsRearm = false
+    private var swipeRearmSince: Double?
 
     /// Feed a sample and return at most one dynamic gesture.
     mutating func update(_ sample: HandPoseSample) -> MotionRecognition {
@@ -74,30 +80,22 @@ struct HandMotionRecognizer {
         }
         lastTimestamp = timestamp
 
-        guard let hand = sample.hand, let center = center(of: hand) else {
-            // A missing hand is also a natural pinch release and starts the next swipe cleanly.
+        guard sample.hand != nil, let center = center(of: sample.hand) else {
+            // A missing hand starts the next swipe cleanly.
             stroke = nil
             lastCenter = nil
-            pinchSince = nil
-            pinchLatched = false
+            swipeNeedsRearm = false
+            swipeRearmSince = nil
             return MotionRecognition(gesture: nil, suppressesStaticCommands: false)
         }
 
         let movement = movement(from: lastCenter, to: center, previousTimestamp: previousTimestamp, timestamp: timestamp)
         lastCenter = center
+        let swipeGesture = updateSwipe(center: center, movement: movement, at: timestamp, isContinuous: isContinuous)
 
-        let pinch = pinchDistance(in: sample)
-        let pinchGesture = updatePinch(distance: pinch, at: timestamp, isContinuous: isContinuous)
-        let swipeGesture = updateSwipe(center: center, at: timestamp, isContinuous: isContinuous)
-
-        // A tucked thumb can sit closer to the index than the release hysteresis (especially in a fist), but it is
-        // not a pinch candidate until it crosses the trigger threshold. Once latched, keep suppressing static poses
-        // until the fingers separate again.
-        let suppressesStaticCommands = movement.isMeaningful || pinch.map { $0 <= Self.pinchThreshold } == true || pinchLatched
         return MotionRecognition(
-            // Pinch is prioritized if a hand happens to close its fingers while moving.
-            gesture: pinchGesture ?? swipeGesture,
-            suppressesStaticCommands: suppressesStaticCommands
+            gesture: swipeGesture,
+            suppressesStaticCommands: movement.isMeaningful
         )
     }
 
@@ -105,31 +103,28 @@ struct HandMotionRecognizer {
         self = HandMotionRecognizer()
     }
 
-    private mutating func updatePinch(distance: Double?, at timestamp: Double, isContinuous: Bool) -> MotionGesture? {
-        guard isContinuous, let distance else {
-            pinchSince = nil
-            pinchLatched = false
-            return nil
-        }
-
-        if distance >= Self.pinchReleaseThreshold {
-            pinchSince = nil
-            pinchLatched = false
-            return nil
-        }
-        guard !pinchLatched, distance <= Self.pinchThreshold else { return nil }
-
-        pinchSince = pinchSince ?? timestamp
-        guard timestamp - (pinchSince ?? timestamp) >= Self.pinchHold else { return nil }
-        pinchLatched = true
-        pinchSince = nil
-        return .pinch
-    }
-
-    private mutating func updateSwipe(center: SIMD2<Double>, at timestamp: Double, isContinuous: Bool) -> MotionGesture? {
+    private mutating func updateSwipe(
+        center: SIMD2<Double>,
+        movement: Movement,
+        at timestamp: Double,
+        isContinuous: Bool
+    ) -> MotionGesture? {
         if let cooldown = swipeCooldownUntil {
             guard timestamp >= cooldown else { return nil }
             swipeCooldownUntil = nil
+        }
+
+        if swipeNeedsRearm {
+            if movement.speed <= Self.movementSuppressionSpeed {
+                swipeRearmSince = swipeRearmSince ?? timestamp
+                guard timestamp - (swipeRearmSince ?? timestamp) >= Self.swipeRearmHold else { return nil }
+                swipeNeedsRearm = false
+                swipeRearmSince = nil
+                stroke = Stroke(start: center, since: timestamp)
+            } else {
+                swipeRearmSince = nil
+            }
+            return nil
         }
 
         guard isContinuous else {
@@ -157,6 +152,8 @@ struct HandMotionRecognizer {
         else { return nil }
 
         self.stroke = nil
+        swipeNeedsRearm = true
+        swipeRearmSince = nil
         swipeCooldownUntil = timestamp + Self.swipeCooldown
         return delta.x >= 0 ? .swipeRight : .swipeLeft
     }
@@ -166,19 +163,20 @@ struct HandMotionRecognizer {
         to current: SIMD2<Double>,
         previousTimestamp: Double?,
         timestamp: Double
-    ) -> (isMeaningful: Bool, speed: Double) {
+    ) -> Movement {
         guard let previous, let previousTimestamp,
               timestamp > previousTimestamp,
               timestamp - previousTimestamp <= Self.maximumSampleGap
-        else { return (false, 0) }
+        else { return Movement(distance: 0, speed: 0) }
 
         let delta = current - previous
         let distance = simd_length(delta)
         let speed = distance / (timestamp - previousTimestamp)
-        return (distance >= Self.movementSuppressionDistance && speed >= Self.movementSuppressionSpeed, speed)
+        return Movement(distance: distance, speed: speed)
     }
 
-    private func center(of hand: DetectedHand) -> SIMD2<Double>? {
+    private func center(of hand: DetectedHand?) -> SIMD2<Double>? {
+        guard let hand else { return nil }
         let joints: [HandJoint] = [.wrist, .indexMCP, .middleMCP, .ringMCP, .littleMCP]
         let points = joints.compactMap { joint -> SIMD2<Double>? in
             guard let position = hand.joints[joint], position.confidence >= Self.minimumJointConfidence else { return nil }
@@ -190,31 +188,11 @@ struct HandMotionRecognizer {
         return points.reduce(.zero, +) / Double(points.count)
     }
 
-    private func pinchDistance(in sample: HandPoseSample) -> Double? {
-        guard let hand = sample.hand,
-              let wrist = confidentPoint(.wrist, in: hand),
-              let middle = confidentPoint(.middleMCP, in: hand),
-              let thumb = confidentPoint(.thumbTip, in: hand),
-              let index = confidentPoint(.indexTip, in: hand)
-        else { return nil }
-
-        let aspect = max(sample.imageAspectRatio, 0.01)
-        func corrected(_ point: SIMD2<Double>) -> SIMD2<Double> { SIMD2(point.x * aspect, point.y) }
-        let palm = simd_length(corrected(middle - wrist))
-        guard palm > 0 else { return nil }
-        return simd_length(corrected(thumb - index)) / palm
-    }
-
-    private func confidentPoint(_ joint: HandJoint, in hand: DetectedHand) -> SIMD2<Double>? {
-        guard let position = hand.joints[joint], position.confidence >= Self.minimumJointConfidence else { return nil }
-        return SIMD2(position.x, position.y)
-    }
-
     private mutating func clearTemporalState() {
         lastCenter = nil
         stroke = nil
         swipeCooldownUntil = nil
-        pinchSince = nil
-        pinchLatched = false
+        swipeNeedsRearm = false
+        swipeRearmSince = nil
     }
 }

@@ -38,14 +38,14 @@ struct SettingsView: View {
             }
 
             Section("Motion shortcuts") {
-                Text("Swipe left or right to move through open apps. Pinch your thumb and index finger to close the active tab or window.")
+                Text("Swipe left or right to move through open apps.")
                     .font(.callout)
                 Text(model.activationMode == .quick
                      ? "Quick mode runs these motion shortcuts directly."
                      : "Safe mode requires the closed-fist wake before a motion shortcut.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("These shortcuts act on whichever app is frontmost. Closing uses ⌘W, so a tab-aware app closes its active tab; other apps close the active window.")
+                Text("This shortcut acts on whichever app is frontmost.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -69,7 +69,7 @@ struct SettingsView: View {
                         AccessibilityPermissionController.requestAccessPrompt()
                         NSWorkspace.shared.open(AccessibilityPermissionController.privacySettingsURL)
                     }
-                    .help("Allow Mime to send ⌘Tab and ⌘W to the frontmost app.")
+                    .help("Allow Mime to send ⌘Tab to switch between frontmost apps.")
                 }
             }
 
@@ -128,7 +128,7 @@ struct SettingsView: View {
         if model.activationMode == .quick {
             switch model.gesturePhase {
             case .listening(let progress):
-                return progress > 0 ? "Keep holding the finger count…" : "Show 1–5 fingers to launch directly."
+                return progress > 0 ? "Finger count recognized." : "Show 1–5 fingers to launch immediately."
             default: break
             }
         }

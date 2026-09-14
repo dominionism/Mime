@@ -212,7 +212,7 @@ struct GestureStatusHUD: View {
                 return "\(Int((progress * 100).rounded()))% · keep holding"
             }
             if model.activationMode == .quick {
-                return "Show 1–5 fingers for 0.05 seconds"
+                return "Show 1–5 fingers to launch immediately"
             }
             if let result = model.lastAcceptedCommand {
                 return "Last: \(result.gesture.name) · ✊ to wake"

@@ -230,9 +230,11 @@ final class AppModel {
             lastDetectedPose = GestureDetection(gesture: pose, detectedAt: Date())
         }
         if isRecognitionActive && !isEditingBindings {
-            let motion = handMotionRecognizer.update(sample)
             let wasArmed = gestureGate.isArmed
-            if motion.suppressesStaticCommands {
+            let motion = handMotionRecognizer.update(sample)
+            // In safe mode the fist is the wake gesture, so hand motion must not interrupt that wake hold. Once
+            // armed (or in Quick mode, where a command is held directly), movement cancels only the pending command.
+            if motion.suppressesStaticCommands && (activationMode == .quick || gestureGate.isArmed) {
                 gestureGate.cancelPendingCommand()
             }
             let canRunMotion = activationMode == .quick || wasArmed
@@ -242,11 +244,21 @@ final class AppModel {
                 // A dynamic action consumes the current safe wake, so another action needs another wake.
                 gestureGate.reset()
             }
-            if !motion.suppressesStaticCommands,
+            // Keep advancing the safe-mode wake while the hand is moving. Once armed, motion cancels only the
+            // pending command; Quick mode cancels its direct command hold immediately.
+            let canAdvanceStaticGate = !motion.suppressesStaticCommands
+                || (activationMode == .wakeThenCommand && !gestureGate.isArmed)
+            if canAdvanceStaticGate,
                let command = gestureGate.update(with: classification, at: sample.timestamp) {
                 lastAcceptedCommand = GestureDetection(gesture: command, detectedAt: Date())
                 acceptedCommandCount += 1
                 openApplication(for: command)
+            }
+            // The wake hand may move into position while the fist is being held. Establish the dynamic-gesture
+            // baseline only after the wake has completed so that movement from the wake pose is not mistaken for a
+            // swipe on the first command frame.
+            if !wasArmed && gestureGate.isArmed {
+                handMotionRecognizer.reset()
             }
             gesturePhase = gestureGate.phase
         }
@@ -264,7 +276,6 @@ final class AppModel {
         let action: SystemGestureAction = switch gesture {
         case .swipeLeft: .previousApplication
         case .swipeRight: .nextApplication
-        case .pinch: .closeCurrentTabOrWindow
         }
 
         do {

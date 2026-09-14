@@ -12,9 +12,9 @@ Mime is a menu-bar app that watches for deliberate hand poses through your Mac's
 1. Turn on recognition from the menu bar.
 2. In Safe mode, hold a closed fist to wake Mime. Quick mode accepts a finger count directly.
 3. Show one through five fingers to run its assigned app.
-4. In Quick mode, swipe left or right to cycle frontmost apps. Pinch your thumb and index finger to send ⌘W to the active app.
+4. Swipe left or right to cycle frontmost apps. Quick mode runs swipes directly; Safe mode requires the fist wake first.
 
-Safe mode keeps everyday movement, like typing, talking or reaching for a drink, from triggering anything. Either hand works. Motion shortcuts need Mime to be allowed under System Settings › Privacy & Security › Accessibility. ⌘W closes the active tab in a tab-aware app and the active window otherwise.
+Safe mode keeps everyday movement, like typing, talking or reaching for a drink, from triggering anything. Either hand works. Motion shortcuts need Mime to be allowed under System Settings › Privacy & Security › Accessibility.
 
 ## Privacy
 
