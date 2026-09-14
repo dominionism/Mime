@@ -15,7 +15,7 @@ enum GestureActivationMode: String, CaseIterable, Codable, Equatable, Sendable {
     var detail: String {
         switch self {
         case .wakeThenCommand: "Hold ✊, then hold 1–5 fingers."
-        case .quick: "Hold 1–5 fingers briefly. Casual poses can launch apps."
+        case .quick: "Show 1–5 fingers for 0.05 seconds. Casual poses can launch apps."
         }
     }
 }

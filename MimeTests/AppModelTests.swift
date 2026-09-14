@@ -377,7 +377,7 @@ private func allowSampleTaskToRun() async {
     for _ in 0..<8 {
         await Task.yield()
     }
-    try? await Task.sleep(for: .milliseconds(5))
+    try? await Task.sleep(for: .milliseconds(25))
 }
 
 private enum AppModelPhaseStage {
