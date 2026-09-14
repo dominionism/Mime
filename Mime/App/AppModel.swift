@@ -11,6 +11,10 @@ final class AppModel {
     private(set) var latestHandPose: HandPoseSample?
     /// The newest classification is exposed for diagnostics and tuning; it never triggers an action by itself.
     private(set) var latestClassification: PoseClassification?
+    /// Retain feedback after the hand leaves view, so a completed attempt can be checked afterward.
+    private(set) var lastDetectedPose: GestureDetection?
+    private(set) var lastAcceptedCommand: GestureDetection?
+    private(set) var acceptedCommandCount = 0
     /// The safety gate's current phase, including wake and command stabilization progress.
     private(set) var gesturePhase = GestureGatePhase.listening(wakeProgress: 0)
     private(set) var trackingFramesPerSecond: Double?
@@ -124,8 +128,14 @@ final class AppModel {
         latestHandPose = sample
         let classification = CuratedGestureClassifier.classify(sample)
         latestClassification = classification
+        if let pose = classification?.pose {
+            lastDetectedPose = GestureDetection(gesture: pose, detectedAt: Date())
+        }
         if isRecognitionActive {
-            _ = gestureGate.update(with: classification, at: sample.timestamp)
+            if let command = gestureGate.update(with: classification, at: sample.timestamp) {
+                lastAcceptedCommand = GestureDetection(gesture: command, detectedAt: Date())
+                acceptedCommandCount += 1
+            }
             gesturePhase = gestureGate.phase
         }
         frameRateMeter.record(sample.timestamp)

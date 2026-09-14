@@ -32,6 +32,7 @@ final class GestureStatusOverlayController {
             _ = model.gesturePhase
             _ = model.cameraError
             _ = model.latestClassification
+            _ = model.lastAcceptedCommand
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -174,9 +175,13 @@ struct GestureStatusHUD: View {
         if let errorMessage { return errorMessage }
         switch model.gesturePhase {
         case .listening(let progress):
-            return progress > 0
-                ? "\(Int((progress * 100).rounded()))% · keep holding"
-                : "Hold ✊ for 0.6 seconds"
+            if progress > 0 {
+                return "\(Int((progress * 100).rounded()))% · keep holding"
+            }
+            if let result = model.lastAcceptedCommand {
+                return "Last: \(result.gesture.name) · ✊ to wake"
+            }
+            return "Hold ✊ for 0.6 seconds"
         case .armed(let secondsLeft, let candidate, let progress):
             let countdown = "\(Int(ceil(secondsLeft)))s left"
             if let candidate {

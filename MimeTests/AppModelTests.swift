@@ -46,7 +46,92 @@ struct AppModelTests {
         await allowSampleTaskToRun()
 
         #expect(model.latestClassification?.pose == .fiveFingers)
+        #expect(model.lastDetectedPose?.gesture == .fiveFingers)
+        #expect(model.lastAcceptedCommand == nil)
+        #expect(model.acceptedCommandCount == 0)
         #expect(model.gesturePhase == .listening(wakeProgress: 0))
+    }
+
+    @Test func detectedPoseRemainsAfterHandLeavesViewAndCaptureStops() async {
+        let tracking = FakeHandTracking()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+
+        await model.setDiagnosticsActive(true)
+        tracking.send(HandFixture().sample(.oneFinger, at: 1))
+        await allowSampleTaskToRun()
+        let detection = model.lastDetectedPose
+        #expect(detection?.gesture == .oneFinger)
+
+        tracking.send(HandPoseSample(timestamp: 2, hand: nil))
+        await allowSampleTaskToRun()
+        #expect(model.latestClassification == nil)
+        #expect(model.lastDetectedPose == detection)
+
+        await model.setDiagnosticsActive(false)
+        #expect(model.latestHandPose == nil)
+        #expect(model.lastDetectedPose == detection)
+        #expect(model.lastAcceptedCommand == nil)
+    }
+
+    @Test func fingerPoseWithoutWakeIsSeenButNeverCountedAsACommand() async {
+        let tracking = FakeHandTracking()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized), handTracking: tracking)
+
+        await model.toggleRecognition()
+        for index in 0...40 {
+            tracking.send(HandFixture().sample(.oneFinger, at: 1 + Double(index) / 32))
+        }
+        await allowSampleTaskToRun()
+
+        #expect(model.lastDetectedPose?.gesture == .oneFinger)
+        #expect(model.lastAcceptedCommand == nil)
+        #expect(model.acceptedCommandCount == 0)
+    }
+
+    @Test func acceptedCommandIsCountedOnceAndRemainsAfterReleaseAndRestart() async {
+        let tracking = FakeHandTracking()
+        let permissions = FakePermissionStatus(cameraAccess: .authorized)
+        let model = AppModel(permissions: permissions, handTracking: tracking)
+
+        await model.toggleRecognition()
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.fist, at: 1 + Double(index) / 32))
+        }
+        for index in 21...110 {
+            tracking.send(HandFixture().sample(.oneFinger, at: 1 + Double(index) / 32))
+        }
+        await allowSampleTaskToRun()
+        let accepted = model.lastAcceptedCommand
+        #expect(accepted?.gesture == .oneFinger)
+        #expect(model.acceptedCommandCount == 1)
+
+        for index in 111...130 {
+            tracking.send(HandPoseSample(timestamp: 1 + Double(index) / 32, hand: nil))
+        }
+        await allowSampleTaskToRun()
+        #expect(model.gesturePhase == .listening(wakeProgress: 0))
+        #expect(model.lastAcceptedCommand == accepted)
+        #expect(model.acceptedCommandCount == 1)
+
+        await model.toggleRecognition()
+        await model.toggleRecognition()
+        #expect(model.lastAcceptedCommand == accepted)
+        #expect(model.acceptedCommandCount == 1)
+
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.fist, at: 10 + Double(index) / 32))
+        }
+        for index in 21...40 {
+            tracking.send(HandFixture().sample(.twoFingers, at: 10 + Double(index) / 32))
+        }
+        await allowSampleTaskToRun()
+        #expect(model.lastAcceptedCommand?.gesture == .twoFingers)
+        #expect(model.acceptedCommandCount == 2)
+
+        let freshModel = AppModel(permissions: permissions, handTracking: FakeHandTracking())
+        #expect(freshModel.lastDetectedPose == nil)
+        #expect(freshModel.lastAcceptedCommand == nil)
+        #expect(freshModel.acceptedCommandCount == 0)
     }
 
     @Test func stoppingRecognitionResetsTheSafetyGateAndClearsSamples() async {
