@@ -43,30 +43,49 @@ enum InputEventError: LocalizedError, Equatable, Sendable {
 @MainActor
 protocol InputEventPosting {
     func postKeyPress(keyCode: CGKeyCode, flags: CGEventFlags) throws
+    func postKeyChord(_ events: [(keyCode: CGKeyCode, keyDown: Bool, flags: CGEventFlags)]) throws
 }
 
-/// Posts one balanced key-down/key-up pair to the frontmost application.
+/// Posts balanced keyboard events to the frontmost application.
 @MainActor
 struct SystemInputEventPoster: InputEventPosting {
     var isAccessibilityTrusted: () -> Bool = { AXIsProcessTrusted() }
 
     func postKeyPress(keyCode: CGKeyCode, flags: CGEventFlags) throws {
+        try postKeyChord([
+            (keyCode: keyCode, keyDown: true, flags: flags),
+            (keyCode: keyCode, keyDown: false, flags: flags)
+        ])
+    }
+
+    func postKeyChord(_ events: [(keyCode: CGKeyCode, keyDown: Bool, flags: CGEventFlags)]) throws {
         guard isAccessibilityTrusted() else {
             throw InputEventError.accessibilityNotAllowed
         }
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
             throw InputEventError.eventSourceUnavailable
         }
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
-        else {
+        guard !events.isEmpty else {
             throw InputEventError.eventCreationFailed
         }
 
-        keyDown.flags = flags
-        keyUp.flags = flags
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        // Create the whole sequence before posting anything. If Quartz cannot create one event, no partial
+        // shortcut reaches the frontmost app.
+        let keyEvents = events.compactMap { event -> CGEvent? in
+            guard let keyEvent = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: event.keyCode,
+                keyDown: event.keyDown
+            ) else { return nil }
+            keyEvent.flags = event.flags
+            return keyEvent
+        }
+        guard keyEvents.count == events.count else {
+            throw InputEventError.eventCreationFailed
+        }
+        for event in keyEvents {
+            event.post(tap: .cghidEventTap)
+        }
     }
 }
 
@@ -78,6 +97,8 @@ protocol SystemActionExecuting {
 
 @MainActor
 struct SystemActionExecutor: SystemActionExecuting {
+    static let commandKeyCode: CGKeyCode = 55
+    static let shiftKeyCode: CGKeyCode = 56
     static let tabKeyCode: CGKeyCode = 48
     static let wKeyCode: CGKeyCode = 13
 
@@ -90,12 +111,31 @@ struct SystemActionExecutor: SystemActionExecuting {
     func perform(_ action: SystemGestureAction) throws {
         switch action {
         case .nextApplication:
-            try poster.postKeyPress(keyCode: Self.tabKeyCode, flags: [.maskCommand])
+            // Keep Command held while Tab is pressed so the system application switcher receives a real shortcut.
+            try poster.postKeyChord([
+                (keyCode: Self.commandKeyCode, keyDown: true, flags: [.maskCommand]),
+                (keyCode: Self.tabKeyCode, keyDown: true, flags: [.maskCommand]),
+                (keyCode: Self.tabKeyCode, keyDown: false, flags: [.maskCommand]),
+                (keyCode: Self.commandKeyCode, keyDown: false, flags: [])
+            ])
         case .previousApplication:
-            try poster.postKeyPress(keyCode: Self.tabKeyCode, flags: [.maskCommand, .maskShift])
+            // Shift is held only for the Tab press, yielding the previous-app direction in the switcher.
+            try poster.postKeyChord([
+                (keyCode: Self.commandKeyCode, keyDown: true, flags: [.maskCommand]),
+                (keyCode: Self.shiftKeyCode, keyDown: true, flags: [.maskCommand, .maskShift]),
+                (keyCode: Self.tabKeyCode, keyDown: true, flags: [.maskCommand, .maskShift]),
+                (keyCode: Self.tabKeyCode, keyDown: false, flags: [.maskCommand, .maskShift]),
+                (keyCode: Self.shiftKeyCode, keyDown: false, flags: [.maskCommand]),
+                (keyCode: Self.commandKeyCode, keyDown: false, flags: [])
+            ])
         case .closeCurrentTabOrWindow:
             // Cmd-W closes the active tab in tab-aware apps and the active window otherwise.
-            try poster.postKeyPress(keyCode: Self.wKeyCode, flags: [.maskCommand])
+            try poster.postKeyChord([
+                (keyCode: Self.commandKeyCode, keyDown: true, flags: [.maskCommand]),
+                (keyCode: Self.wKeyCode, keyDown: true, flags: [.maskCommand]),
+                (keyCode: Self.wKeyCode, keyDown: false, flags: [.maskCommand]),
+                (keyCode: Self.commandKeyCode, keyDown: false, flags: [])
+            ])
         }
     }
 }

@@ -8,7 +8,12 @@ struct InputEventPosterTests {
         let poster = FakeInputEventPoster()
         try SystemActionExecutor(poster: poster).perform(.nextApplication)
 
-        let expected: [(CGKeyCode, CGEventFlags)] = [(SystemActionExecutor.tabKeyCode, [.maskCommand])]
+        let expected: [(CGKeyCode, Bool, CGEventFlags)] = [
+            (SystemActionExecutor.commandKeyCode, true, [.maskCommand]),
+            (SystemActionExecutor.tabKeyCode, true, [.maskCommand]),
+            (SystemActionExecutor.tabKeyCode, false, [.maskCommand]),
+            (SystemActionExecutor.commandKeyCode, false, [])
+        ]
         #expect(poster.events == expected)
     }
 
@@ -16,7 +21,14 @@ struct InputEventPosterTests {
         let poster = FakeInputEventPoster()
         try SystemActionExecutor(poster: poster).perform(.previousApplication)
 
-        let expected: [(CGKeyCode, CGEventFlags)] = [(SystemActionExecutor.tabKeyCode, [.maskCommand, .maskShift])]
+        let expected: [(CGKeyCode, Bool, CGEventFlags)] = [
+            (SystemActionExecutor.commandKeyCode, true, [.maskCommand]),
+            (SystemActionExecutor.shiftKeyCode, true, [.maskCommand, .maskShift]),
+            (SystemActionExecutor.tabKeyCode, true, [.maskCommand, .maskShift]),
+            (SystemActionExecutor.tabKeyCode, false, [.maskCommand, .maskShift]),
+            (SystemActionExecutor.shiftKeyCode, false, [.maskCommand]),
+            (SystemActionExecutor.commandKeyCode, false, [])
+        ]
         #expect(poster.events == expected)
     }
 
@@ -24,7 +36,12 @@ struct InputEventPosterTests {
         let poster = FakeInputEventPoster()
         try SystemActionExecutor(poster: poster).perform(.closeCurrentTabOrWindow)
 
-        let expected: [(CGKeyCode, CGEventFlags)] = [(SystemActionExecutor.wKeyCode, [.maskCommand])]
+        let expected: [(CGKeyCode, Bool, CGEventFlags)] = [
+            (SystemActionExecutor.commandKeyCode, true, [.maskCommand]),
+            (SystemActionExecutor.wKeyCode, true, [.maskCommand]),
+            (SystemActionExecutor.wKeyCode, false, [.maskCommand]),
+            (SystemActionExecutor.commandKeyCode, false, [])
+        ]
         #expect(poster.events == expected)
     }
 
@@ -44,13 +61,20 @@ struct InputEventPosterTests {
 
 @MainActor
 private final class FakeInputEventPoster: InputEventPosting {
-    private(set) var events: [(CGKeyCode, CGEventFlags)] = []
+    private(set) var events: [(CGKeyCode, Bool, CGEventFlags)] = []
 
     func postKeyPress(keyCode: CGKeyCode, flags: CGEventFlags) throws {
-        events.append((keyCode, flags))
+        events.append((keyCode, true, flags))
+        events.append((keyCode, false, flags))
+    }
+
+    func postKeyChord(_ chord: [(keyCode: CGKeyCode, keyDown: Bool, flags: CGEventFlags)]) throws {
+        events.append(contentsOf: chord.map { ($0.keyCode, $0.keyDown, $0.flags) })
     }
 }
 
-private func == (lhs: [(CGKeyCode, CGEventFlags)], rhs: [(CGKeyCode, CGEventFlags)]) -> Bool {
-    lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { $0.0.0 == $0.1.0 && $0.0.1 == $0.1.1 }
+private func == (lhs: [(CGKeyCode, Bool, CGEventFlags)], rhs: [(CGKeyCode, Bool, CGEventFlags)]) -> Bool {
+    lhs.count == rhs.count && zip(lhs, rhs).allSatisfy {
+        $0.0.0 == $0.1.0 && $0.0.1 == $0.1.1 && $0.0.2 == $0.1.2
+    }
 }
