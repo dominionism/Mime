@@ -11,7 +11,7 @@ enum GestureGatePhase: Equatable, Sendable {
 /// Turns a stream of pose classifications into deliberate commands.
 ///
 /// In safe mode, a closed fist held for 0.6 seconds arms the gate for 3 seconds, then a command pose held for 0.4
-/// seconds emits once. Quick mode accepts a command pose directly after a 0.15-second hold. Both modes cool down for
+/// seconds emits once. Quick mode accepts a command pose directly after a 0.05-second hold. Both modes cool down for
 /// 2 seconds and wait until the pose has been released for 0.3 seconds before listening again. A missing hand,
 /// unrecognized pose, or gap between samples restarts whatever pose was being held.
 ///
@@ -20,8 +20,8 @@ struct GestureGate {
     static let wakeHold = 0.6
     static let armedDuration = 3.0
     static let commandHold = 0.4
-    /// Quick mode skips the wake pose but keeps a short five-sample stabilization hold at 30 fps.
-    static let quickCommandHold = 0.15
+    /// Quick mode skips the wake pose but keeps a short two-sample stabilization hold at 30 fps.
+    static let quickCommandHold = 0.05
     static let cooldownDuration = 2.0
     /// A command pose scoring below this counts as released.
     static let releaseScore = 0.6
