@@ -324,6 +324,26 @@ struct AppModelTests {
         #expect(model.gesturePhase.stage == .listening)
     }
 
+    @Test func safeMotionShortcutIgnoresSwipeWithoutWake() async {
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(
+            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
+            handTracking: tracking,
+            configurationStore: FakeConfigurationStore(),
+            applicationLauncher: FakeApplicationLauncher(),
+            systemActionExecutor: actions
+        )
+
+        await model.toggleRecognition()
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fiveFingers, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
+        await allowSampleTaskToRun()
+
+        #expect(actions.actions.isEmpty)
+        #expect(model.lastMotionGesture == nil)
+    }
+
     @Test func motionGesturesWaitForRecognitionInsteadOfDiagnostics() async {
         let tracking = FakeHandTracking()
         let actions = FakeSystemActionExecutor()
