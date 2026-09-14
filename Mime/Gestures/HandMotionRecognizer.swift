@@ -90,7 +90,10 @@ struct HandMotionRecognizer {
         let pinchGesture = updatePinch(distance: pinch, at: timestamp, isContinuous: isContinuous)
         let swipeGesture = updateSwipe(center: center, at: timestamp, isContinuous: isContinuous)
 
-        let suppressesStaticCommands = movement.isMeaningful || pinch.map { $0 < Self.pinchReleaseThreshold } == true
+        // A tucked thumb can sit closer to the index than the release hysteresis (especially in a fist), but it is
+        // not a pinch candidate until it crosses the trigger threshold. Once latched, keep suppressing static poses
+        // until the fingers separate again.
+        let suppressesStaticCommands = movement.isMeaningful || pinch.map { $0 <= Self.pinchThreshold } == true || pinchLatched
         return MotionRecognition(
             // Pinch is prioritized if a hand happens to close its fingers while moving.
             gesture: pinchGesture ?? swipeGesture,

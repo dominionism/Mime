@@ -23,6 +23,12 @@ struct MenuBarContentView: View {
             }
         }
         Text("Accessibility: \(model.accessibilityAccess.label)")
+        if model.accessibilityAccess == .notAllowed {
+            Button("Open Accessibility Settings…") {
+                AccessibilityPermissionController.requestAccessPrompt()
+                NSWorkspace.shared.open(AccessibilityPermissionController.privacySettingsURL)
+            }
+        }
 
         Divider()
 

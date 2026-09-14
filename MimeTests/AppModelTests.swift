@@ -233,6 +233,97 @@ struct AppModelTests {
         #expect(model.cameraAccess == .authorized)
         #expect(model.accessibilityAccess == .allowed)
     }
+
+    @Test func swipeRightCyclesToTheNextApplication() async {
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(
+            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
+            handTracking: tracking,
+            configurationStore: FakeConfigurationStore(),
+            applicationLauncher: FakeApplicationLauncher(),
+            systemActionExecutor: actions
+        )
+
+        await model.toggleRecognition()
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fiveFingers, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
+        await allowSampleTaskToRun()
+
+        #expect(actions.actions == [.nextApplication])
+        #expect(model.lastMotionGesture?.gesture == .swipeRight)
+        #expect(model.systemActionStatus == .performed(.swipeRight))
+    }
+
+    @Test func pinchClosesTheActiveTabOrWindow() async {
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(
+            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
+            handTracking: tracking,
+            configurationStore: FakeConfigurationStore(),
+            applicationLauncher: FakeApplicationLauncher(),
+            systemActionExecutor: actions
+        )
+
+        await model.toggleRecognition()
+        tracking.send(pinchSample(at: 1))
+        tracking.send(pinchSample(at: 1.10))
+        await allowSampleTaskToRun()
+
+        #expect(actions.actions == [.closeCurrentTabOrWindow])
+        #expect(model.lastMotionGesture?.gesture == .pinch)
+    }
+
+    @Test func aSwipeCancelsAQuickStaticCommandWhileItIsMoving() async {
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(
+            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
+            handTracking: tracking,
+            configurationStore: store,
+            applicationLauncher: FakeApplicationLauncher(),
+            systemActionExecutor: actions
+        )
+
+        await model.toggleRecognition()
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fiveFingers, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
+        await allowSampleTaskToRun()
+
+        #expect(model.acceptedCommandCount == 0)
+        #expect(actions.actions == [.nextApplication])
+    }
+
+    @Test func motionGesturesWaitForRecognitionInsteadOfDiagnostics() async {
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(
+            permissions: FakePermissionStatus(cameraAccess: .authorized, accessibilityAccess: .allowed),
+            handTracking: tracking,
+            configurationStore: FakeConfigurationStore(),
+            applicationLauncher: FakeApplicationLauncher(),
+            systemActionExecutor: actions
+        )
+
+        await model.setDiagnosticsActive(true)
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fiveFingers, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
+        await allowSampleTaskToRun()
+
+        #expect(actions.actions.isEmpty)
+        #expect(model.lastMotionGesture == nil)
+    }
+
+    private func pinchSample(at timestamp: Double) -> HandPoseSample {
+        let fixture = HandFixture()
+        var hand = fixture.hand(.oneFinger)
+        let index = hand.joints[.indexTip]!
+        hand.joints[.thumbTip] = HandJointPosition(x: index.x + 0.02 * fixture.scale, y: index.y, confidence: 0.9)
+        return HandPoseSample(timestamp: timestamp, hand: hand, imageAspectRatio: fixture.imageAspectRatio)
+    }
 }
 
 private func allowSampleTaskToRun() async {

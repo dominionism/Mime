@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -14,7 +15,7 @@ struct SettingsView: View {
                 GestureResultRow("Last pose seen", detection: model.lastDetectedPose)
                 GestureResultRow("Last command accepted", detection: model.lastAcceptedCommand)
                 LabeledContent("Commands accepted", value: "\(model.acceptedCommandCount)")
-                Text("A pose is what the camera recognized. A command is accepted after the closed-fist wake and a held finger count. Results stay here until you quit Mime.")
+                Text("A pose is what the camera recognized. A command is accepted according to the selected speed mode. Results stay here until you quit Mime.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -33,6 +34,37 @@ struct SettingsView: View {
                     Label("Quick mode may open an app when you casually hold up a finger count.", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Motion shortcuts") {
+                Text("Swipe left or right to move through open apps. Pinch your thumb and index finger to close the active tab or window.")
+                    .font(.callout)
+                Text("These shortcuts act on whichever app is frontmost. Closing uses ⌘W, so a tab-aware app closes its active tab; other apps close the active window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                switch model.systemActionStatus {
+                case .idle:
+                    EmptyView()
+                case .performed(let gesture):
+                    LabeledContent("Last motion", value: "\(gesture.emoji) \(gesture.name)")
+                case .failed(let gesture, let message):
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Could not run \(gesture.name)")
+                            .font(.caption.weight(.semibold))
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if model.accessibilityAccess == .notAllowed {
+                    Button("Open Accessibility Settings…") {
+                        AccessibilityPermissionController.requestAccessPrompt()
+                        NSWorkspace.shared.open(AccessibilityPermissionController.privacySettingsURL)
+                    }
+                    .help("Allow Mime to send ⌘Tab and ⌘W to the frontmost app.")
                 }
             }
 

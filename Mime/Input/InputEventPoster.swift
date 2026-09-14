@@ -14,6 +14,13 @@ enum SystemGestureAction: Equatable, Sendable {
     case closeCurrentTabOrWindow
 }
 
+/// Feedback for the most recent dynamic gesture action.
+enum SystemActionStatus: Equatable, Sendable {
+    case idle
+    case performed(MotionGesture)
+    case failed(MotionGesture, message: String)
+}
+
 /// Errors that can occur before a synthetic keyboard shortcut reaches the frontmost app.
 enum InputEventError: LocalizedError, Equatable, Sendable {
     case accessibilityNotAllowed

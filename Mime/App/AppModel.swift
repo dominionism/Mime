@@ -14,12 +14,14 @@ final class AppModel {
     /// Retain feedback after the hand leaves view, so a completed attempt can be checked afterward.
     private(set) var lastDetectedPose: GestureDetection?
     private(set) var lastAcceptedCommand: GestureDetection?
+    private(set) var lastMotionGesture: MotionGestureDetection?
     private(set) var acceptedCommandCount = 0
     private(set) var configuration = Configuration()
     private(set) var configurationError: String?
     private(set) var canEditBindings = true
     private(set) var isEditingBindings = false
     private(set) var applicationLaunchStatus = ApplicationLaunchStatus.idle
+    private(set) var systemActionStatus = SystemActionStatus.idle
     private(set) var activationMode = GestureActivationMode.wakeThenCommand
     /// The safety gate's current phase, including wake and command stabilization progress.
     private(set) var gesturePhase = GestureGatePhase.listening(wakeProgress: 0)
@@ -32,11 +34,13 @@ final class AppModel {
     @ObservationIgnored private let handTracking: any HandTracking
     @ObservationIgnored private let configurationStore: any ConfigurationStoring
     @ObservationIgnored private let applicationLauncher: any ApplicationLaunching
+    @ObservationIgnored private let systemActionExecutor: any SystemActionExecuting
     @ObservationIgnored private var launchTask: Task<Void, Never>?
     @ObservationIgnored private var launchID: UUID?
     @ObservationIgnored private var isCapturing = false
     @ObservationIgnored private var frameRateMeter = FrameRateMeter()
     @ObservationIgnored private var gestureGate = GestureGate()
+    @ObservationIgnored private var handMotionRecognizer = HandMotionRecognizer()
     @ObservationIgnored private var sampleTask: Task<Void, Never>?
     @ObservationIgnored private var menuTrackingObserver: (any NSObjectProtocol)?
 
@@ -44,12 +48,14 @@ final class AppModel {
         permissions: any PermissionStatusProviding = SystemPermissionStatus(),
         handTracking: any HandTracking = CameraHandTracking(),
         configurationStore: any ConfigurationStoring = ConfigurationStore(),
-        applicationLauncher: any ApplicationLaunching = ApplicationLauncher()
+        applicationLauncher: any ApplicationLaunching = ApplicationLauncher(),
+        systemActionExecutor: any SystemActionExecuting = SystemActionExecutor()
     ) {
         self.permissions = permissions
         self.handTracking = handTracking
         self.configurationStore = configurationStore
         self.applicationLauncher = applicationLauncher
+        self.systemActionExecutor = systemActionExecutor
         cameraAccess = permissions.cameraAccess
         accessibilityAccess = permissions.accessibilityAccess
         reloadConfiguration()
@@ -129,9 +135,10 @@ final class AppModel {
 
     func resetConfiguration() {
         cancelPendingLaunch()
-        resetGestureGate()
         do {
             configuration = try configurationStore.reset()
+            activationMode = configuration.activationMode
+            resetGestureGate()
             configurationError = nil
             canEditBindings = true
         } catch {
@@ -223,7 +230,16 @@ final class AppModel {
             lastDetectedPose = GestureDetection(gesture: pose, detectedAt: Date())
         }
         if isRecognitionActive && !isEditingBindings {
-            if let command = gestureGate.update(with: classification, at: sample.timestamp) {
+            let motion = handMotionRecognizer.update(sample)
+            if motion.suppressesStaticCommands {
+                gestureGate.reset()
+            }
+            if let gesture = motion.gesture {
+                lastMotionGesture = MotionGestureDetection(gesture: gesture, detectedAt: Date())
+                performSystemAction(for: gesture)
+            }
+            if !motion.suppressesStaticCommands,
+               let command = gestureGate.update(with: classification, at: sample.timestamp) {
                 lastAcceptedCommand = GestureDetection(gesture: command, detectedAt: Date())
                 acceptedCommandCount += 1
                 openApplication(for: command)
@@ -236,7 +252,24 @@ final class AppModel {
 
     private func resetGestureGate() {
         gestureGate = GestureGate(mode: activationMode)
+        handMotionRecognizer.reset()
         gesturePhase = gestureGate.phase
+    }
+
+    private func performSystemAction(for gesture: MotionGesture) {
+        let action: SystemGestureAction = switch gesture {
+        case .swipeLeft: .previousApplication
+        case .swipeRight: .nextApplication
+        case .pinch: .closeCurrentTabOrWindow
+        }
+
+        do {
+            try systemActionExecutor.perform(action)
+            systemActionStatus = .performed(gesture)
+        } catch {
+            refreshPermissions()
+            systemActionStatus = .failed(gesture, message: error.localizedDescription)
+        }
     }
 
     private func openApplication(for gesture: GestureID) {

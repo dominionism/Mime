@@ -156,6 +156,7 @@ struct GestureStatusHUD: View {
     private var icon: String {
         if errorMessage != nil { return "⚠️" }
         if model.isEditingBindings { return "⏸" }
+        if case .failed = model.systemActionStatus { return "⚠️" }
         if case .cooldown(_, let secondsLeft) = model.gesturePhase, secondsLeft > 0,
            case .failed = model.applicationLaunchStatus {
             return "⚠️"
@@ -170,6 +171,9 @@ struct GestureStatusHUD: View {
     private var title: String {
         if errorMessage != nil { return "Camera unavailable" }
         if model.isEditingBindings { return "Choosing an app" }
+        if case .failed(let gesture, _) = model.systemActionStatus {
+            return "Couldn’t run \(gesture.name)"
+        }
         switch model.gesturePhase {
         case .listening(let progress):
             if model.activationMode == .quick {
@@ -196,6 +200,9 @@ struct GestureStatusHUD: View {
         }
         switch model.gesturePhase {
         case .listening(let progress):
+            if case .performed(let gesture) = model.systemActionStatus {
+                return "\(gesture.name) · ready"
+            }
             if progress > 0 {
                 return "\(Int((progress * 100).rounded()))% · keep holding"
             }
@@ -213,6 +220,9 @@ struct GestureStatusHUD: View {
             }
             return "Show 1–5 fingers · \(countdown)"
         case .cooldown(let command, let secondsLeft):
+            if case .performed(let gesture) = model.systemActionStatus {
+                return "\(gesture.name) completed"
+            }
             if secondsLeft > 0 {
                 switch model.applicationLaunchStatus {
                 case .failed: return "Check Settings · release your hand"

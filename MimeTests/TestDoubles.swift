@@ -103,3 +103,14 @@ final class FakeApplicationLauncher: ApplicationLaunching {
         completions.removeFirst().resume()
     }
 }
+
+@MainActor
+final class FakeSystemActionExecutor: SystemActionExecuting {
+    var error: (any Error)?
+    private(set) var actions: [SystemGestureAction] = []
+
+    func perform(_ action: SystemGestureAction) throws {
+        actions.append(action)
+        if let error { throw error }
+    }
+}
