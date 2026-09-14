@@ -57,6 +57,45 @@ struct ApplicationBindingTests {
         #expect(model.applicationLaunchStatus == .opened(application))
     }
 
+    @Test func quickModeLaunchesACommandWithoutTheWakePose() async throws {
+        let store = FakeConfigurationStore()
+        try store.configuration.setApplication(application, for: .threeFingers)
+        store.configuration.activationMode = .quick
+        let tracking = FakeHandTracking()
+        let launcher = FakeApplicationLauncher()
+        let model = makeModel(tracking: tracking, store: store, launcher: launcher)
+
+        await model.toggleRecognition()
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.threeFingers, at: 1 + Double(index) / 32))
+        }
+        await drain()
+
+        #expect(model.activationMode == .quick)
+        #expect(model.acceptedCommandCount == 1)
+        #expect(launcher.applications == [application])
+    }
+
+    @Test func changingActivationModePersistsAndResetsAnInProgressWake() async throws {
+        let store = FakeConfigurationStore()
+        let tracking = FakeHandTracking()
+        let model = makeModel(tracking: tracking, store: store)
+        await model.toggleRecognition()
+        tracking.send(HandFixture().sample(.fist, at: 1))
+        await drain()
+        if case .listening = model.gesturePhase {
+            // Expected: the wake hold has only just begun.
+        } else {
+            Issue.record("Expected the gate to be listening")
+        }
+
+        model.setActivationMode(.quick)
+
+        #expect(model.activationMode == .quick)
+        #expect(store.configuration.activationMode == .quick)
+        #expect(model.gesturePhase == .listening(wakeProgress: 0))
+    }
+
     @Test func commandWithoutWakeAndDiagnosticsOnlyNeverLaunchApps() async throws {
         let (model, tracking, launcher) = try boundModel()
         await model.setDiagnosticsActive(true)
@@ -174,7 +213,7 @@ struct ApplicationBindingTests {
     }
 
     private func drain() async {
-        for _ in 0..<8 { await Task.yield() }
-        try? await Task.sleep(for: .milliseconds(5))
+        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(25))
     }
 }

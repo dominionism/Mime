@@ -11,10 +11,16 @@ struct Configuration: Codable, Equatable, Sendable {
 
     let schemaVersion: Int
     var bindings: [GestureBinding]
+    var activationMode: GestureActivationMode
 
-    init(schemaVersion: Int = Self.currentSchemaVersion, bindings: [GestureBinding] = []) {
+    init(
+        schemaVersion: Int = Self.currentSchemaVersion,
+        bindings: [GestureBinding] = [],
+        activationMode: GestureActivationMode = .wakeThenCommand
+    ) {
         self.schemaVersion = schemaVersion
         self.bindings = bindings
+        self.activationMode = activationMode
     }
 
     func application(for gesture: GestureID) -> ApplicationTarget? {
@@ -54,6 +60,7 @@ struct Configuration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case bindings
+        case activationMode
     }
 
     init(from decoder: any Decoder) throws {
@@ -64,6 +71,8 @@ struct Configuration: Codable, Equatable, Sendable {
             throw ConfigurationError.unsupportedSchema(schemaVersion)
         }
         bindings = try container.decode([GestureBinding].self, forKey: .bindings)
+        // Configurations written before Quick mode existed default to the safe gate.
+        activationMode = try container.decodeIfPresent(GestureActivationMode.self, forKey: .activationMode) ?? .wakeThenCommand
         try validate()
     }
 }

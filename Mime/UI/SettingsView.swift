@@ -19,6 +19,23 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Gesture speed") {
+                Picker("Activation", selection: activationModeBinding) {
+                    ForEach(GestureActivationMode.allCases, id: \.self) { mode in
+                        Text(mode.name).tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                Text(model.activationMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if model.activationMode == .quick {
+                    Label("Quick mode may open an app when you casually hold up a finger count.", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
             ApplicationBindingsView(model: model)
 
             Section("Hand Tracking") {
@@ -60,9 +77,23 @@ struct SettingsView: View {
         )
     }
 
+    private var activationModeBinding: Binding<GestureActivationMode> {
+        Binding(
+            get: { model.activationMode },
+            set: { model.setActivationMode($0) }
+        )
+    }
+
     private var recognitionGuidance: String {
         if model.isEditingBindings {
             return "Recognition is paused while you choose an app."
+        }
+        if model.activationMode == .quick {
+            switch model.gesturePhase {
+            case .listening(let progress):
+                return progress > 0 ? "Keep holding the finger count…" : "Show 1–5 fingers to launch directly."
+            default: break
+            }
         }
         switch model.gesturePhase {
         case .listening(let progress):

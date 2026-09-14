@@ -1,6 +1,6 @@
 /// What the safety gate is doing, for the status display.
 enum GestureGatePhase: Equatable, Sendable {
-    /// Waiting for a closed fist. `wakeProgress` runs from 0 to 1 while the fist is held.
+    /// Waiting for a wake fist in safe mode or a command pose in quick mode. Progress runs from 0 to 1 while held.
     case listening(wakeProgress: Double)
     /// Awake and waiting for a command pose. `commandProgress` runs from 0 to 1 while `candidate` is held.
     case armed(secondsLeft: Double, candidate: GestureID?, commandProgress: Double)
@@ -10,22 +10,26 @@ enum GestureGatePhase: Equatable, Sendable {
 
 /// Turns a stream of pose classifications into deliberate commands.
 ///
-/// A closed fist held for 0.6 seconds arms the gate for 3 seconds. A command pose held for 0.4 seconds while armed emits
-/// that command once. The gate then cools down for 2 seconds and also waits until the pose has been released for
-/// 0.3 seconds before it listens for another closed fist. A missing hand, an unrecognized pose, or a gap between samples
-/// restarts whatever pose was being held.
+/// In safe mode, a closed fist held for 0.6 seconds arms the gate for 3 seconds, then a command pose held for 0.4
+/// seconds emits once. Quick mode accepts a command pose directly after a 0.3-second hold. Both modes cool down for
+/// 2 seconds and wait until the pose has been released for 0.3 seconds before listening again. A missing hand,
+/// unrecognized pose, or gap between samples restarts whatever pose was being held.
 ///
 /// Time comes from each sample's timestamp, so the gate behaves the same in tests as it does with a live camera.
 struct GestureGate {
     static let wakeHold = 0.6
     static let armedDuration = 3.0
     static let commandHold = 0.4
+    /// Quick mode skips the wake pose but keeps a shorter stabilization hold.
+    static let quickCommandHold = 0.3
     static let cooldownDuration = 2.0
     /// A command pose scoring below this counts as released.
     static let releaseScore = 0.6
     static let releaseHold = 0.3
     /// Samples further apart than this can't show that a pose was held in between.
     static let maximumSampleGap = 0.25
+
+    let mode: GestureActivationMode
 
     private enum State {
         case listening
@@ -39,6 +43,10 @@ struct GestureGate {
     /// The recognized pose held in consecutive samples, and the timestamp of the first of them.
     private var hold: (pose: GestureID, since: Double)?
     private var lastTimestamp: Double?
+
+    init(mode: GestureActivationMode = .wakeThenCommand) {
+        self.mode = mode
+    }
 
     /// Processes the classification for one sample, or `nil` when the sample has no hand, and returns the command
     /// this sample completed, if any.
@@ -66,6 +74,13 @@ struct GestureGate {
 
         switch state {
         case .listening:
+            if mode == .quick {
+                guard let hold, hold.pose.isCommand,
+                      timestamp - hold.since >= Self.quickCommandHold else { return nil }
+                state = .cooldown(command: hold.pose, until: timestamp + Self.cooldownDuration, releasedSince: nil)
+                self.hold = nil
+                return hold.pose
+            }
             guard let hold, hold.pose.isWake, timestamp - hold.since >= Self.wakeHold else { return nil }
             state = .armed(until: timestamp + Self.armedDuration)
             // A command has to be a new pose, not a continuation of the fist that woke the gate.
@@ -99,14 +114,18 @@ struct GestureGate {
 
     /// Returns to listening and forgets any held pose, as when recognition stops.
     mutating func reset() {
-        self = GestureGate()
+        self = GestureGate(mode: mode)
     }
 
     private func currentPhase(at timestamp: Double) -> GestureGatePhase {
         switch state {
         case .listening:
-            guard let hold, hold.pose.isWake else { return .listening(wakeProgress: 0) }
-            return .listening(wakeProgress: min((timestamp - hold.since) / Self.wakeHold, 1))
+            guard let hold else { return .listening(wakeProgress: 0) }
+            let holdDuration = mode == .quick ? Self.quickCommandHold : Self.wakeHold
+            guard mode == .quick ? hold.pose.isCommand : hold.pose.isWake else {
+                return .listening(wakeProgress: 0)
+            }
+            return .listening(wakeProgress: min((timestamp - hold.since) / holdDuration, 1))
 
         case .armed(let deadline):
             let secondsLeft = max(deadline - timestamp, 0)

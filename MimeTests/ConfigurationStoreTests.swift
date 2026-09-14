@@ -34,6 +34,28 @@ struct ConfigurationStoreTests {
         #expect(reloaded.application(for: .oneFinger) == nil)
     }
 
+    @Test func legacyConfigurationDefaultsToTheSafeActivationMode() throws {
+        let location = ConfigurationTestLocation()
+        defer { location.remove() }
+        try location.write(Data(#"{"schemaVersion":1,"bindings":[]}"#.utf8))
+
+        let configuration = try ConfigurationStore(fileURL: location.fileURL).load()
+
+        #expect(configuration.activationMode == .wakeThenCommand)
+    }
+
+    @Test func quickActivationModeRoundTripsWithMappings() throws {
+        let location = ConfigurationTestLocation()
+        defer { location.remove() }
+        let store = ConfigurationStore(fileURL: location.fileURL)
+        var configuration = Configuration(activationMode: .quick)
+        try configuration.setApplication(testApplication(), for: .fiveFingers)
+        try store.save(configuration)
+
+        #expect(try store.load() == configuration)
+        #expect(String(data: try Data(contentsOf: location.fileURL), encoding: .utf8)?.contains("quick") == true)
+    }
+
     @Test(arguments: [
         "not JSON",
         #"{"schemaVersion":1,"bindings":[{"gesture":"unknown","application":{}}]}"#,

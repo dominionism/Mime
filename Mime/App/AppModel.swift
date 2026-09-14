@@ -20,6 +20,7 @@ final class AppModel {
     private(set) var canEditBindings = true
     private(set) var isEditingBindings = false
     private(set) var applicationLaunchStatus = ApplicationLaunchStatus.idle
+    private(set) var activationMode = GestureActivationMode.wakeThenCommand
     /// The safety gate's current phase, including wake and command stabilization progress.
     private(set) var gesturePhase = GestureGatePhase.listening(wakeProgress: 0)
     private(set) var trackingFramesPerSecond: Double?
@@ -109,14 +110,18 @@ final class AppModel {
 
     func reloadConfiguration() {
         cancelPendingLaunch()
-        resetGestureGate()
         do {
-            configuration = try configurationStore.load()
+            let loaded = try configurationStore.load()
+            configuration = loaded
+            activationMode = loaded.activationMode
+            resetGestureGate()
             configurationError = nil
             canEditBindings = true
         } catch {
             // Disable bindings when the saved configuration cannot be trusted; preserve the file for recovery.
             configuration = Configuration()
+            activationMode = .wakeThenCommand
+            resetGestureGate()
             configurationError = error.localizedDescription
             canEditBindings = false
         }
@@ -146,6 +151,22 @@ final class AppModel {
             configurationError = nil
         } catch {
             // Keep the last saved binding active if the replacement cannot be written.
+            configurationError = error.localizedDescription
+        }
+    }
+
+    func setActivationMode(_ mode: GestureActivationMode) {
+        guard canEditBindings, mode != activationMode else { return }
+        cancelPendingLaunch()
+        var updated = configuration
+        updated.activationMode = mode
+        do {
+            try configurationStore.save(updated)
+            configuration = updated
+            activationMode = mode
+            resetGestureGate()
+            configurationError = nil
+        } catch {
             configurationError = error.localizedDescription
         }
     }
@@ -214,7 +235,7 @@ final class AppModel {
     }
 
     private func resetGestureGate() {
-        gestureGate.reset()
+        gestureGate = GestureGate(mode: activationMode)
         gesturePhase = gestureGate.phase
     }
 

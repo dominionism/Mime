@@ -35,6 +35,7 @@ final class GestureStatusOverlayController {
             _ = model.lastAcceptedCommand
             _ = model.applicationLaunchStatus
             _ = model.isEditingBindings
+            _ = model.activationMode
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.refresh()
@@ -171,6 +172,9 @@ struct GestureStatusHUD: View {
         if model.isEditingBindings { return "Choosing an app" }
         switch model.gesturePhase {
         case .listening(let progress):
+            if model.activationMode == .quick {
+                return progress > 0 ? "Hold finger count…" : "Quick mode ready"
+            }
             return progress > 0 ? "Hold closed fist…" : "Listening for wake"
         case .armed(_, let candidate, _):
             return candidate.map { "Ready for \($0.name)" } ?? "Ready for a command"
@@ -194,6 +198,9 @@ struct GestureStatusHUD: View {
         case .listening(let progress):
             if progress > 0 {
                 return "\(Int((progress * 100).rounded()))% · keep holding"
+            }
+            if model.activationMode == .quick {
+                return "Show 1–5 fingers for 0.3 seconds"
             }
             if let result = model.lastAcceptedCommand {
                 return "Last: \(result.gesture.name) · ✊ to wake"

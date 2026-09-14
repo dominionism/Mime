@@ -85,6 +85,43 @@ struct GestureGateTests {
         #expect(driver.gate.phase.stage == .listening)
     }
 
+    @Test func quickModeAcceptsAHeldFingerCountWithoutWake() {
+        var gate = GestureGate(mode: .quick)
+        let holdCount = samplesToHold(GestureGate.quickCommandHold)
+
+        for index in 0..<(holdCount - 1) {
+            #expect(gate.update(with: recognized(.threeFingers), at: Double(index + 1) * GateDriver.frame) == nil)
+        }
+
+        let command = gate.update(with: recognized(.threeFingers), at: Double(holdCount) * GateDriver.frame)
+
+        #expect(command == .threeFingers)
+        #expect(gate.phase.stage == .cooldown)
+    }
+
+    @Test func quickModeStillStabilizesAndIgnoresTheWakeFist() {
+        var gate = GestureGate(mode: .quick)
+        let holdCount = samplesToHold(GestureGate.quickCommandHold)
+
+        for index in 0...holdCount {
+            gate.update(with: recognized(.fist), at: Double(index + 1) * GateDriver.frame)
+        }
+        #expect(gate.phase.stage == .listening)
+
+        for index in 0..<(holdCount - 1) {
+            gate.update(with: recognized(.oneFinger), at: 2 + Double(index + 1) * GateDriver.frame)
+        }
+        #expect(gate.phase.stage == .listening)
+    }
+
+    @Test func resettingQuickModeKeepsItsActivationMode() {
+        var gate = GestureGate(mode: .quick)
+        gate.reset()
+
+        #expect(gate.mode == .quick)
+        #expect(gate.phase == .listening(wakeProgress: 0))
+    }
+
     @Test func emitsAHeldCommandExactlyOnce() {
         var driver = GateDriver()
         driver.wake()
