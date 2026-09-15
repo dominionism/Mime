@@ -21,7 +21,11 @@ enum HandPoseNormalizer {
     ///
     /// A hand whose chirality Vision couldn't determine is treated as a right hand.
     static func normalize(_ hand: DetectedHand, imageAspectRatio: Double) -> NormalizedHand? {
-        guard let wristPosition = hand.joints[.wrist], let knucklePosition = hand.joints[.middleMCP] else {
+        guard imageAspectRatio.isFinite, imageAspectRatio > 0,
+              let wristPosition = hand.joints[.wrist], let knucklePosition = hand.joints[.middleMCP],
+              wristPosition.x.isFinite, wristPosition.y.isFinite,
+              knucklePosition.x.isFinite, knucklePosition.y.isFinite
+        else {
             return nil
         }
 
@@ -35,7 +39,7 @@ enum HandPoseNormalizer {
         let wrist = imagePoint(wristPosition)
         let palmAxis = imagePoint(knucklePosition) - wrist
         let palmLength = simd_length(palmAxis)
-        guard palmLength > 0 else { return nil }
+        guard palmLength.isFinite, palmLength > 1e-6 else { return nil }
 
         // Rotates any vector by the angle that turns the palm axis straight up.
         let up = palmAxis / palmLength
@@ -46,7 +50,9 @@ enum HandPoseNormalizer {
         var points: [HandJoint: SIMD2<Double>] = [:]
         var confidences: [HandJoint: Float] = [:]
         for (joint, position) in hand.joints {
-            points[joint] = rotate(imagePoint(position) - wrist) / palmLength
+            let point = rotate(imagePoint(position) - wrist) / palmLength
+            guard point.x.isFinite, point.y.isFinite, position.confidence.isFinite else { continue }
+            points[joint] = point
             confidences[joint] = position.confidence
         }
         return NormalizedHand(points: points, confidences: confidences, imageUp: rotate(SIMD2(0, 1)))

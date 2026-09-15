@@ -46,6 +46,20 @@ struct HandPoseNormalizerTests {
         #expect(HandPoseNormalizer.normalize(hand, imageAspectRatio: 16.0 / 9.0) == nil)
     }
 
+    @Test(arguments: [Double.nan, .infinity, 0, -1])
+    func rejectsInvalidImageProportions(aspectRatio: Double) {
+        #expect(HandPoseNormalizer.normalize(HandFixture().hand(.fiveFingers), imageAspectRatio: aspectRatio) == nil)
+    }
+
+    @Test func rejectsNonFiniteOrCollapsedPalmAxes() {
+        var hand = HandFixture().hand(.fiveFingers)
+        hand.joints[.wrist]?.x = .infinity
+        #expect(HandPoseNormalizer.normalize(hand, imageAspectRatio: 16.0 / 9.0) == nil)
+        hand = HandFixture().hand(.fiveFingers)
+        hand.joints[.middleMCP] = hand.joints[.wrist]
+        #expect(HandPoseNormalizer.normalize(hand, imageAspectRatio: 16.0 / 9.0) == nil)
+    }
+
     private func normalize(_ fixture: HandFixture, _ shape: HandShape) throws -> NormalizedHand {
         try #require(HandPoseNormalizer.normalize(fixture.hand(shape), imageAspectRatio: fixture.imageAspectRatio))
     }

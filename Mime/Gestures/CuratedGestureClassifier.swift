@@ -15,8 +15,8 @@ struct PoseClassification: Equatable, Sendable {
 
 /// Recognizes Mime's wake pose and five curated finger-count commands from finger geometry.
 ///
-/// Each pose is a set of requirements, such as "index finger extended" or "thumb tucked", and each requirement
-/// scores from 0 to 1. A pose scores as its weakest requirement, so every requirement must hold at once.
+/// Counts clearly extended fingers, including the thumb, in any combination. Every finger needs positive evidence
+/// that it is extended or folded; an uncertain finger never silently counts as folded.
 enum CuratedGestureClassifier {
     /// A joint Vision is less confident about than this can't count toward any pose.
     static let minimumJointConfidence: Float = 0.5
@@ -35,17 +35,13 @@ enum CuratedGestureClassifier {
     }
 
     static func classify(_ hand: NormalizedHand) -> PoseClassification {
-        let measurements = HandMeasurements(hand)
-        var scores: [GestureID: Double] = [:]
-        for gesture in GestureID.allCases {
-            scores[gesture] = measurements.score(gesture)
-        }
+        let scores = HandMeasurements(hand).scores()
         return PoseClassification(scores: scores, pose: recognizedPose(in: scores))
     }
 
     /// The best-scoring pose, if it scores high enough and clearly beats the runner-up.
     static func recognizedPose(in scores: [GestureID: Double]) -> GestureID? {
-        let ranked = scores.sorted { $0.value > $1.value }
+        let ranked = scores.filter { $0.value.isFinite }.sorted { $0.value > $1.value }
         guard let best = ranked.first, best.value >= minimumScore else { return nil }
         let runnerUp = ranked.dropFirst().first?.value ?? 0
         return best.value - runnerUp >= minimumMargin ? best.key : nil
@@ -57,7 +53,7 @@ enum CuratedGestureClassifier {
 /// A measurement is `nil` when a joint it needs is missing or below the confidence floor, and a `nil` requirement
 /// fails its pose.
 private struct HandMeasurements {
-    private enum Finger {
+    private enum Finger: CaseIterable {
         case index, middle, ring, little
 
         var joints: (mcp: HandJoint, pip: HandJoint, dip: HandJoint, tip: HandJoint) {
@@ -76,75 +72,93 @@ private struct HandMeasurements {
         self.hand = hand
     }
 
-    func score(_ gesture: GestureID) -> Double {
+    func scores() -> [GestureID: Double] {
+        let poses: [GestureID] = [.fist, .oneFinger, .twoFingers, .threeFingers, .fourFingers, .fiveFingers]
+        var scores = Dictionary(uniqueKeysWithValues: poses.map { ($0, 0.0) })
         // Every measurement is relative to the wrist and middle knuckle, so both must be reliable.
-        guard point(.wrist) != nil, point(.middleMCP) != nil else { return 0 }
+        guard point(.wrist) != nil, point(.middleMCP) != nil else { return scores }
 
-        let requirements: [Double?] = switch gesture {
-        case .fist:
-            [curled(.index), curled(.middle), curled(.ring), curled(.little), thumbTucked]
-        case .oneFinger:
-            [extended(.index), curled(.middle), curled(.ring), curled(.little), thumbTucked]
-        case .twoFingers:
-            [extended(.index), extended(.middle), curled(.ring), curled(.little), thumbTucked]
-        case .threeFingers:
-            [extended(.index), extended(.middle), extended(.ring), curled(.little), thumbTucked]
-        case .fourFingers:
-            [extended(.index), extended(.middle), extended(.ring), extended(.little), thumbTucked]
-        case .fiveFingers:
-            [extended(.index), extended(.middle), extended(.ring), extended(.little), thumbExtended, palmFacesCamera]
+        let fingers = Finger.allCases.map(evidence) + [thumbEvidence]
+        // Different combinations with the same count are the same command. Keep the strongest supported
+        // combination; within each combination, even one ambiguous finger limits the entire pose's score.
+        for mask in 0..<32 {
+            let score = fingers.enumerated().reduce(1.0) { score, item in
+                min(score, mask & (1 << item.offset) == 0 ? item.element.folded : item.element.extended)
+            }
+            let gesture = poses[mask.nonzeroBitCount]
+            scores[gesture] = max(scores[gesture] ?? 0, score)
         }
-        return requirements.reduce(1) { min($0, $1 ?? 0) }
+        return scores
     }
 
     /// A joint's position, or `nil` if Vision couldn't place it confidently.
     private func point(_ joint: HandJoint) -> SIMD2<Double>? {
-        guard let confidence = hand.confidences[joint],
-              confidence >= CuratedGestureClassifier.minimumJointConfidence
+        guard let confidence = hand.confidences[joint], confidence.isFinite,
+              confidence >= CuratedGestureClassifier.minimumJointConfidence,
+              let point = hand.points[joint], point.x.isFinite, point.y.isFinite
         else { return nil }
-        return hand.points[joint]
+        return point
     }
 
-    /// 1 for a straight finger reaching away from the wrist, 0 for one folded back toward the palm.
-    private func extended(_ finger: Finger) -> Double? {
+    private struct FingerEvidence {
+        var extended = 0.0
+        var folded = 0.0
+    }
+
+    private func evidence(_ finger: Finger) -> FingerEvidence {
         let joints = finger.joints
-        guard let mcp = point(joints.mcp), let pip = point(joints.pip), let dip = point(joints.dip),
-              let tip = point(joints.tip)
-        else { return nil }
+        guard let mcp = point(joints.mcp), let pip = point(joints.pip),
+              simd_length(pip - mcp) > 1e-6, simd_length(pip) > 1e-6
+        else { return FingerEvidence() }
 
-        // Seen from the wrist, an extended fingertip lies well beyond the finger's middle joint, while a curled
-        // fingertip folds back inside it.
-        let reach = ramp(ratio(simd_length(tip), simd_length(pip)), from: 1, to: 1.2)
-        let straightness = ramp(angle(at: pip, between: mcp, and: dip), from: 100, to: 150)
-        return min(reach, straightness)
+        var result = FingerEvidence()
+        if let tip = point(joints.tip), simd_length(tip - pip) > 1e-6 {
+            // Measure against this finger's own proximal bone, not the whole palm: short little fingers and
+            // fingers splayed sideways should not need to reach as far from the wrist as a middle finger.
+            let reach = ratio(simd_length(tip - mcp), simd_length(pip - mcp))
+            let bend = angle(at: pip, between: mcp, and: tip)
+            result.extended = min(ramp(reach, from: 1.35, to: 1.75), ramp(bend, from: 105, to: 145))
+            if let dip = point(joints.dip), simd_length(dip - pip) > 1e-6, simd_length(tip - dip) > 1e-6 {
+                // A visible hook at the fingertip is conflicting evidence, even if the PIP is straight.
+                result.extended = min(result.extended, ramp(angle(at: dip, between: pip, and: tip), from: 100, to: 145))
+            }
+            let foldsTowardPalm = ramp(ratio(simd_length(tip), simd_length(pip)), from: 1.15, to: 1.02)
+            let foldedShape = max(ramp(bend, from: 135, to: 95), ramp(reach, from: 1.35, to: 0.85))
+            result.folded = min(foldsTowardPalm, foldedShape)
+        } else if let dip = point(joints.dip), simd_length(dip - pip) > 1e-6 {
+            // Folded fingertips often disappear behind the palm. A confidently located DIP already bending
+            // back inside the PIP is positive curl evidence; missing landmarks alone are never sufficient.
+            result.folded = min(
+                ramp(angle(at: pip, between: mcp, and: dip), from: 120, to: 90),
+                ramp(ratio(simd_length(dip), simd_length(pip)), from: 1.05, to: 0.98)
+            )
+        }
+        return result
     }
 
-    private func curled(_ finger: Finger) -> Double? {
-        extended(finger).map { 1 - $0 }
-    }
-
-    /// 1 when the thumb is folded into the palm.
-    private var thumbTucked: Double? {
-        thumbExtended.map { 1 - $0 }
-    }
-
-    /// 1 for a straight thumb reaching away from the fingers, 0 for one folded across them.
-    private var thumbExtended: Double? {
+    private var thumbEvidence: FingerEvidence {
         guard let mp = point(.thumbMP), let ip = point(.thumbIP), let tip = point(.thumbTip),
-              let littleKnuckle = point(.littleMCP)
-        else { return nil }
+              let index = point(.indexMCP), let little = point(.littleMCP),
+              simd_length(mp - ip) > 1e-6, simd_length(tip - ip) > 1e-6
+        else { return FingerEvidence() }
+        let width = simd_length(index - little)
+        guard width > 1e-6 else { return FingerEvidence() }
 
-        // A folded thumb's tip moves toward the little finger, and an extended thumb's tip moves away from it.
-        let reach = ramp(ratio(simd_length(tip - littleKnuckle), simd_length(ip - littleKnuckle)), from: 1, to: 1.1)
-        let straightness = ramp(angle(at: ip, between: mp, and: tip), from: 120, to: 155)
-        return min(reach, straightness)
-    }
-
-    /// 1 when the palm faces the camera, 0 when the hand is edge-on or shows its back.
-    private var palmFacesCamera: Double? {
-        guard let index = point(.indexMCP), let little = point(.littleMCP) else { return nil }
-        // In right-hand space, a palm facing the camera puts the index knuckle on the positive x side.
-        return ramp(index.x - little.x, from: 0.1, to: 0.35)
+        // The knuckle line, rather than chirality's sign, tells us which side is the thumb side. This also works
+        // from the back of the hand and while Vision briefly reports unknown or incorrect chirality.
+        let outward = index - little
+        let lateralReach = simd_dot(tip - index, outward / width) / width
+        let upwardReach = (tip.y - index.y) / width
+        let separated = max(
+            ramp(lateralReach, from: 0.08, to: 0.28),
+            min(ramp(upwardReach, from: 0.05, to: 0.3), ramp(lateralReach, from: 0, to: 0.12))
+        )
+        return FingerEvidence(
+            extended: min(separated, ramp(angle(at: ip, between: mp, and: tip), from: 115, to: 150)),
+            // A thumb resting across the palm can be quite straight. Its location shows that it is tucked;
+            // requiring a sharp thumb bend needlessly rejects otherwise clear one-to-four counts.
+            folded: 1 - separated
+        )
     }
 
 }

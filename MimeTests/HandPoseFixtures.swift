@@ -8,6 +8,8 @@ struct HandShape: Sendable {
     enum Finger: Sendable {
         /// Straight, pointing this many degrees away from the palm axis, toward the thumb when positive.
         case extended(degrees: Double)
+        /// Clearly raised, with a natural bend through the two distal joints.
+        case relaxed(degrees: Double)
         /// Folded into the palm.
         case curled
         /// Bent halfway, neither clearly extended nor curled.
@@ -70,6 +72,12 @@ struct HandShape: Sendable {
             points[joints.pip] = knuckle + lengths.0 * direction
             points[joints.dip] = knuckle + (lengths.0 + lengths.1) * direction
             points[joints.tip] = knuckle + (lengths.0 + lengths.1 + lengths.2) * direction
+        case .relaxed(let degrees):
+            let pip = knuckle + lengths.0 * unitVector(degrees: degrees)
+            let dip = pip + lengths.1 * unitVector(degrees: degrees + 15)
+            points[joints.pip] = pip
+            points[joints.dip] = dip
+            points[joints.tip] = dip + lengths.2 * unitVector(degrees: degrees + 25)
         case .curled:
             points[joints.pip] = knuckle + SIMD2(0, 0.2)
             points[joints.dip] = knuckle + SIMD2(0.03, 0.02)
