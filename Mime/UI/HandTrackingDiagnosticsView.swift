@@ -35,6 +35,11 @@ struct HandTrackingDiagnosticsView: View {
                     Text("\(Int(framesPerSecond.rounded())) fps")
                         .monospacedDigit()
                 }
+                if isActive, let duration = sample?.processingDuration, duration.isFinite, duration >= 0 {
+                    Text("\(Int((duration * 1_000).rounded())) ms tracking")
+                        .monospacedDigit()
+                        .help("Time spent analyzing the latest camera frame. This excludes camera exposure and app activation.")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)

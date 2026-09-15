@@ -23,6 +23,7 @@ final class HandPoseDetector {
     }
 
     func process(_ sampleBuffer: CMSampleBuffer) {
+        let started = ContinuousClock.now
         let timestamp = sampleBuffer.presentationTimeStamp.seconds
         let handler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .up, options: [:])
 
@@ -38,6 +39,8 @@ final class HandPoseDetector {
         if let image = sampleBuffer.imageBuffer, CVPixelBufferGetHeight(image) > 0 {
             sample.imageAspectRatio = Double(CVPixelBufferGetWidth(image)) / Double(CVPixelBufferGetHeight(image))
         }
+        let elapsed = started.duration(to: .now).components
+        sample.processingDuration = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         publish(sample)
     }
 

@@ -42,4 +42,7 @@ struct HandPoseSample: Equatable, Sendable {
     var hand: DetectedHand?
     /// The camera image's width divided by its height, which restores true proportions to normalized joint positions.
     var imageAspectRatio = 16.0 / 9.0
+    /// Seconds spent detecting and copying the hand pose, measured on a monotonic clock. Camera samples only;
+    /// synthetic samples can omit it. This is processing time, not the full camera-to-app response time.
+    var processingDuration: Double? = nil
 }
