@@ -12,7 +12,9 @@ struct ApplicationBindingsView: View {
 
     var body: some View {
         Section("Open Apps") {
-            Text("Choose an app for each finger count. Hold a closed fist to wake Mime, then show the fingers for that app.")
+            Text(model.activationMode == .quick
+                 ? "Choose an app for each finger count, then show that many fingers. Any combination counts, including your thumb."
+                 : "Choose an app for each finger count. Hold a closed fist to wake Mime, then show that many fingers.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

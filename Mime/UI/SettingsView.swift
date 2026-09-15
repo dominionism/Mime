@@ -45,7 +45,7 @@ struct SettingsView: View {
                      : "Safe mode requires the closed-fist wake before a motion shortcut.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("This shortcut acts on whichever app is frontmost.")
+                Text("Each swipe moves one app forward or backward in a stable order. Pause briefly between swipes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -62,14 +62,6 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
-                }
-
-                if model.accessibilityAccess == .notAllowed {
-                    Button("Open Accessibility Settings…") {
-                        AccessibilityPermissionController.requestAccessPrompt()
-                        NSWorkspace.shared.open(AccessibilityPermissionController.privacySettingsURL)
-                    }
-                    .help("Allow Mime to send ⌘Tab to switch between frontmost apps.")
                 }
             }
 
@@ -129,6 +121,8 @@ struct SettingsView: View {
             switch model.gesturePhase {
             case .listening(let progress):
                 return progress > 0 ? "Finger count recognized." : "Show 1–5 fingers to launch immediately."
+            case .cooldown:
+                return "Show another count, or lower your hand and repeat."
             default: break
             }
         }

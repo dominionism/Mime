@@ -12,6 +12,7 @@ final class GestureStatusOverlayController {
     private var hostingView: NSHostingView<GestureStatusHUD>?
     private var errorDismissTask: Task<Void, Never>?
     private var visibleError: String?
+    private var renderedError: String?
     private var reportedError: String?
 
     init(model: AppModel) {
@@ -29,18 +30,9 @@ final class GestureStatusOverlayController {
 
         withObservationTracking {
             _ = model.isRecognitionActive
-            _ = model.gesturePhase
             _ = model.cameraError
-            _ = model.latestClassification
-            _ = model.lastAcceptedCommand
-            _ = model.lastMotionGesture
-            _ = model.systemActionStatus
-            _ = model.applicationLaunchStatus
-            _ = model.isEditingBindings
-            _ = model.activationMode
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.refresh()
                 self?.observeModel()
             }
         }
@@ -69,9 +61,16 @@ final class GestureStatusOverlayController {
         }
 
         let panel = makePanelIfNeeded(for: model)
-        hostingView?.rootView = GestureStatusHUD(model: model, errorMessage: visibleError)
-        position(panel)
-        panel.orderFrontRegardless()
+        // SwiftUI observes the model's gesture feedback itself. Replacing the hosting root and ordering the
+        // panel for each camera sample only adds main-thread work to the recognition path.
+        if renderedError != visibleError {
+            hostingView?.rootView = GestureStatusHUD(model: model, errorMessage: visibleError)
+            renderedError = visibleError
+        }
+        if !panel.isVisible {
+            position(panel)
+            panel.orderFrontRegardless()
+        }
     }
 
     private func showError(_ message: String) {
@@ -159,7 +158,10 @@ struct GestureStatusHUD: View {
         if errorMessage != nil { return "⚠️" }
         if model.isEditingBindings { return "⏸" }
         if case .failed = model.systemActionStatus { return "⚠️" }
-        if case .cooldown(_, let secondsLeft) = model.gesturePhase, secondsLeft > 0,
+        if case .performed(let gesture) = model.systemActionStatus,
+           model.activationMode == .quick { return gesture.emoji }
+        if case .cooldown(_, let secondsLeft) = model.gesturePhase,
+           (model.activationMode == .quick || secondsLeft > 0),
            case .failed = model.applicationLaunchStatus {
             return "⚠️"
         }
@@ -176,16 +178,18 @@ struct GestureStatusHUD: View {
         if case .failed(let gesture, _) = model.systemActionStatus {
             return "Couldn’t run \(gesture.name)"
         }
+        if case .performed = model.systemActionStatus,
+           model.activationMode == .quick { return "Switched apps" }
         switch model.gesturePhase {
         case .listening(let progress):
             if model.activationMode == .quick {
-                return progress > 0 ? "Hold finger count…" : "Quick mode ready"
+                return "Quick mode ready"
             }
             return progress > 0 ? "Hold closed fist…" : "Listening for wake"
         case .armed(_, let candidate, _):
             return candidate.map { "Ready for \($0.name)" } ?? "Ready for a command"
         case .cooldown(let command, let secondsLeft):
-            guard secondsLeft > 0 else { return "Release \(command.name)" }
+            guard model.activationMode == .quick || secondsLeft > 0 else { return "Release \(command.name)" }
             switch model.applicationLaunchStatus {
             case .idle: return "Recognized \(command.name)"
             case .opening(let application): return "Opening \(application.name)…"
@@ -225,6 +229,16 @@ struct GestureStatusHUD: View {
             }
             return "Show 1–5 fingers · \(countdown)"
         case .cooldown(let command, let secondsLeft):
+            if model.activationMode == .quick {
+                if case .performed(let gesture) = model.systemActionStatus {
+                    return "\(gesture.name) · swipe again or change count"
+                }
+                switch model.applicationLaunchStatus {
+                case .failed: return "Check Settings · try the count again"
+                case .unassigned: return "Choose an app in Settings"
+                default: return "Show another count, or lower and repeat"
+                }
+            }
             if case .performed(let gesture) = model.systemActionStatus {
                 return "\(gesture.name) completed"
             }
