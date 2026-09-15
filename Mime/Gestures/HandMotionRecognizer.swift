@@ -20,179 +20,174 @@ enum MotionGesture: String, CaseIterable, Codable, Equatable, Sendable {
     }
 }
 
-/// The result of feeding one hand-pose sample into the motion recognizer.
 struct MotionRecognition: Equatable, Sendable {
     let gesture: MotionGesture?
-    /// A moving hand should not simultaneously complete a static finger-count command.
+    /// Horizontal swipe intent temporarily takes priority over finger-count commands.
     let suppressesStaticCommands: Bool
 }
 
-/// Recognizes short horizontal swipes from raw hand landmarks.
-///
-/// Swipe positions stay in camera-image coordinates because the normalizer intentionally removes translation. The
-/// x-axis is mirrored into the user's view so a hand moving right produces `swipeRight` for either hand.
+/// Recognizes horizontal translation of the palm in the user's mirrored camera view.
 struct HandMotionRecognizer {
     static let minimumJointConfidence: Float = 0.5
-    /// A hand-width swipe is easy to make in the camera preview without requiring an exaggerated throw.
-    static let minimumSwipeDistance = 0.12
-    static let maximumSwipeDuration = 0.8
+    static let minimumSwipeDistance = 0.07
+    static let maximumSwipeDistance = 0.14
+    static let maximumSwipeDuration = 0.6
     static let minimumSwipeSpeed = 0.25
-    static let maximumVerticalDrift = 0.2
-    /// Movement cancels a pending finger-count command as soon as the hand leaves its still position.
-    static let movementSuppressionDistance = 0.018
-    static let movementSuppressionSpeed = 0.18
-    static let swipeCooldown = 0.55
-    static let swipeRearmHold = 0.18
+    static let movementSuppressionDistance = 0.025
+    static let swipeCooldown = 0.2
+    static let swipeRearmHold = 0.1
     static let maximumSampleGap = 0.25
 
-    private struct Stroke {
-        var start: SIMD2<Double>
-        var since: Double
+    private struct Palm {
+        let points: [HandJoint: SIMD2<Double>]
+        let chirality: HandChirality
+        let length: Double?
     }
 
-    private struct Movement {
-        var distance: Double
-        var speed: Double
-
-        var isMeaningful: Bool {
-            distance >= HandMotionRecognizer.movementSuppressionDistance
-                || speed >= HandMotionRecognizer.movementSuppressionSpeed
-        }
+    private struct Stroke {
+        let start: SIMD2<Double>
+        let since: Double
+        let direction: Double
     }
 
     private var lastTimestamp: Double?
-    private var lastCenter: SIMD2<Double>?
+    private var lastPalm: Palm?
+    private var position = SIMD2<Double>.zero
     private var stroke: Stroke?
+    private var quietSince: Double?
     private var swipeCooldownUntil: Double?
     private var swipeNeedsRearm = false
-    private var swipeRearmSince: Double?
 
-    /// Feed a sample and return at most one dynamic gesture.
     mutating func update(_ sample: HandPoseSample) -> MotionRecognition {
         let timestamp = sample.timestamp
-        let previousTimestamp = lastTimestamp
-        let isContinuous = previousTimestamp.map {
-            timestamp >= $0 && timestamp - $0 <= Self.maximumSampleGap
-        } ?? true
-
-        if !isContinuous {
-            clearTemporalState()
+        guard timestamp.isFinite else {
+            reset()
+            return result()
         }
+        if let previous = lastTimestamp,
+           timestamp <= previous || timestamp - previous > Self.maximumSampleGap {
+            reset()
+        }
+        let previousTimestamp = lastTimestamp
         lastTimestamp = timestamp
 
-        guard sample.hand != nil, let center = center(of: sample.hand) else {
-            // A missing hand starts the next swipe cleanly.
+        guard let palm = palm(in: sample) else {
+            lastPalm = nil
             stroke = nil
-            lastCenter = nil
-            swipeNeedsRearm = false
-            swipeRearmSince = nil
-            return MotionRecognition(gesture: nil, suppressesStaticCommands: false)
+            quietSince = quietSince ?? timestamp
+            rearmIfReady(at: timestamp)
+            return result()
+        }
+        defer { lastPalm = palm }
+        guard let previous = lastPalm, let previousTimestamp else {
+            // Time with no tracked hand counts as release. Consume that interval before the new stroke moves
+            // and clears quietSince, otherwise a hand re-entering after cooldown would need another pause.
+            rearmIfReady(at: timestamp)
+            return result(suppresses: swipeNeedsRearm)
+        }
+        if previous.chirality != .unknown && palm.chirality != .unknown && previous.chirality != palm.chirality {
+            stroke = nil
+            quietSince = nil
+            position = .zero
+            return result()
         }
 
-        let movement = movement(from: lastCenter, to: center, previousTimestamp: previousTimestamp, timestamp: timestamp)
-        lastCenter = center
-        let swipeGesture = updateSwipe(center: center, movement: movement, at: timestamp, isContinuous: isContinuous)
+        // Compare the same landmarks in both frames. Averaging whichever joints happen to be confident in each
+        // frame makes a stationary hand appear to jump when a wrist or knuckle drops out of tracking.
+        let displacements = palm.points.compactMap { joint, point in
+            previous.points[joint].map { point - $0 }
+        }
+        guard displacements.count >= 3 else {
+            stroke = nil
+            quietSince = nil
+            return result()
+        }
+        let delta = SIMD2(median(displacements.map(\.x)), median(displacements.map(\.y)))
+        let elapsed = timestamp - previousTimestamp
+        let distance = simd_length(delta)
+        let speed = distance / elapsed
+        let previousPosition = position
+        position += delta
+        let isQuiet = distance < 0.008 && speed < 0.15
+        quietSince = isQuiet ? (quietSince ?? previousTimestamp) : nil
 
-        return MotionRecognition(
-            gesture: swipeGesture,
-            suppressesStaticCommands: movement.isMeaningful
-        )
+        if swipeNeedsRearm {
+            rearmIfReady(at: timestamp)
+            return result(suppresses: swipeNeedsRearm)
+        }
+
+        let horizontalStep = abs(delta.x) > 0.0025 && abs(delta.x) > abs(delta.y) * 1.25
+        if horizontalStep {
+            let direction = delta.x >= 0 ? 1.0 : -1.0
+            if stroke == nil || (stroke?.direction != direction && abs(delta.x) > 0.004) {
+                // A stroke starts when motion starts, never when an idle hand first appeared.
+                stroke = Stroke(start: previousPosition, since: previousTimestamp, direction: direction)
+            }
+        }
+        guard let stroke else { return result() }
+        let duration = timestamp - stroke.since
+        let travel = position - stroke.start
+        let horizontal = abs(travel.x)
+        let vertical = abs(travel.y)
+        if duration > Self.maximumSwipeDuration || (vertical > 0.025 && vertical > horizontal)
+            || quietSince.map({ timestamp - $0 >= Self.swipeRearmHold }) == true {
+            self.stroke = nil
+            return result()
+        }
+
+        let hasIntent = horizontal >= Self.movementSuppressionDistance && horizontal > vertical * 1.25
+        let palmDistance = (palm.length ?? Self.minimumSwipeDistance) * 0.9
+        let requiredDistance = min(Self.maximumSwipeDistance, max(Self.minimumSwipeDistance, palmDistance))
+        guard horizontal >= requiredDistance, horizontal > vertical * 1.5,
+              horizontal / duration >= Self.minimumSwipeSpeed else {
+            return result(suppresses: hasIntent)
+        }
+
+        self.stroke = nil
+        swipeNeedsRearm = true
+        quietSince = nil
+        swipeCooldownUntil = timestamp + Self.swipeCooldown
+        return MotionRecognition(gesture: travel.x >= 0 ? .swipeRight : .swipeLeft, suppressesStaticCommands: true)
     }
 
     mutating func reset() {
         self = HandMotionRecognizer()
     }
 
-    private mutating func updateSwipe(
-        center: SIMD2<Double>,
-        movement: Movement,
-        at timestamp: Double,
-        isContinuous: Bool
-    ) -> MotionGesture? {
-        if let cooldown = swipeCooldownUntil {
-            guard timestamp >= cooldown else { return nil }
-            swipeCooldownUntil = nil
-        }
-
-        if swipeNeedsRearm {
-            if movement.speed <= Self.movementSuppressionSpeed {
-                swipeRearmSince = swipeRearmSince ?? timestamp
-                guard timestamp - (swipeRearmSince ?? timestamp) >= Self.swipeRearmHold else { return nil }
-                swipeNeedsRearm = false
-                swipeRearmSince = nil
-                stroke = Stroke(start: center, since: timestamp)
-            } else {
-                swipeRearmSince = nil
-            }
-            return nil
-        }
-
-        guard isContinuous else {
-            stroke = Stroke(start: center, since: timestamp)
-            return nil
-        }
-        guard let stroke else {
-            self.stroke = Stroke(start: center, since: timestamp)
-            return nil
-        }
-
-        let elapsed = timestamp - stroke.since
-        guard elapsed <= Self.maximumSwipeDuration else {
-            self.stroke = Stroke(start: center, since: timestamp)
-            return nil
-        }
-
-        let delta = center - stroke.start
-        let horizontal = abs(delta.x)
-        let vertical = abs(delta.y)
-        guard horizontal >= Self.minimumSwipeDistance,
-              horizontal >= vertical,
-              vertical <= Self.maximumVerticalDrift,
-              horizontal / max(elapsed, 0.001) >= Self.minimumSwipeSpeed
-        else { return nil }
-
-        self.stroke = nil
-        swipeNeedsRearm = true
-        swipeRearmSince = nil
-        swipeCooldownUntil = timestamp + Self.swipeCooldown
-        return delta.x >= 0 ? .swipeRight : .swipeLeft
-    }
-
-    private func movement(
-        from previous: SIMD2<Double>?,
-        to current: SIMD2<Double>,
-        previousTimestamp: Double?,
-        timestamp: Double
-    ) -> Movement {
-        guard let previous, let previousTimestamp,
-              timestamp > previousTimestamp,
-              timestamp - previousTimestamp <= Self.maximumSampleGap
-        else { return Movement(distance: 0, speed: 0) }
-
-        let delta = current - previous
-        let distance = simd_length(delta)
-        let speed = distance / (timestamp - previousTimestamp)
-        return Movement(distance: distance, speed: speed)
-    }
-
-    private func center(of hand: DetectedHand?) -> SIMD2<Double>? {
-        guard let hand else { return nil }
-        let joints: [HandJoint] = [.wrist, .indexMCP, .middleMCP, .ringMCP, .littleMCP]
-        let points = joints.compactMap { joint -> SIMD2<Double>? in
-            guard let position = hand.joints[joint], position.confidence >= Self.minimumJointConfidence else { return nil }
-            // Mirror x into the user's view. y already has the camera's bottom-left origin, which is fine for
-            // comparing vertical drift.
-            return SIMD2(1 - position.x, position.y)
-        }
-        guard !points.isEmpty else { return nil }
-        return points.reduce(.zero, +) / Double(points.count)
-    }
-
-    private mutating func clearTemporalState() {
-        lastCenter = nil
-        stroke = nil
-        swipeCooldownUntil = nil
+    private mutating func rearmIfReady(at timestamp: Double) {
+        guard swipeNeedsRearm,
+              timestamp >= (swipeCooldownUntil ?? timestamp),
+              let quietSince, timestamp - quietSince >= Self.swipeRearmHold else { return }
+        // Stillness accumulates during cooldown, so the waits overlap instead of adding to every gesture.
         swipeNeedsRearm = false
-        swipeRearmSince = nil
+        swipeCooldownUntil = nil
+        stroke = nil
+    }
+
+    private func result(suppresses: Bool = false) -> MotionRecognition {
+        MotionRecognition(gesture: nil, suppressesStaticCommands: suppresses)
+    }
+
+    private func palm(in sample: HandPoseSample) -> Palm? {
+        guard let hand = sample.hand, sample.imageAspectRatio.isFinite, sample.imageAspectRatio > 0 else { return nil }
+        let joints: [HandJoint] = [.wrist, .indexMCP, .middleMCP, .ringMCP, .littleMCP]
+        var points: [HandJoint: SIMD2<Double>] = [:]
+        for joint in joints {
+            guard let point = hand.joints[joint], point.confidence >= Self.minimumJointConfidence,
+                  point.x.isFinite, point.y.isFinite else { continue }
+            // Scale y to image-width units so horizontal/vertical comparisons are physically meaningful.
+            points[joint] = SIMD2(1 - point.x, point.y / sample.imageAspectRatio)
+        }
+        guard points.count >= 3 else { return nil }
+        let lengths = points[.wrist].map { wrist in
+            [.indexMCP, .middleMCP, .ringMCP, .littleMCP].compactMap { points[$0].map { simd_length($0 - wrist) } }
+        } ?? []
+        return Palm(points: points, chirality: hand.chirality, length: lengths.isEmpty ? nil : median(lengths))
+    }
+
+    private func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
     }
 }

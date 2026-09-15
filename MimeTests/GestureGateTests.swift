@@ -103,6 +103,76 @@ struct GestureGateTests {
         #expect(gate.update(with: recognized(.oneFinger), at: 2 + GateDriver.frame) == .oneFinger)
     }
 
+    @Test(arguments: GestureID.commands)
+    func quickModeDoesNotRepeatAHeldCount(command: GestureID) {
+        var gate = GestureGate(mode: .quick)
+        #expect(gate.update(with: recognized(command), at: 0) == command)
+        for index in 1...160 {
+            #expect(gate.update(with: recognized(command), at: Double(index) / 32) == nil)
+        }
+    }
+
+    @Test func quickModeSwitchesCountsWithoutTheTwoSecondLockout() {
+        var gate = GestureGate(mode: .quick)
+        #expect(gate.update(with: recognized(.oneFinger), at: 0) == .oneFinger)
+        #expect(gate.update(with: recognized(.threeFingers), at: 0.10) == nil)
+        #expect(gate.update(with: recognized(.threeFingers), at: 0.14) == nil)
+        #expect(gate.update(with: recognized(.threeFingers), at: 0.18) == .threeFingers)
+    }
+
+    @Test func quickModeIgnoresTransientCountsAndTrackingDropouts() {
+        var gate = GestureGate(mode: .quick)
+        _ = gate.update(with: recognized(.fiveFingers), at: 0)
+        #expect(gate.update(with: recognized(.fourFingers), at: 0.20) == nil)
+        #expect(gate.update(with: nil, at: 0.23) == nil)
+        #expect(gate.update(with: recognized(.fiveFingers), at: 0.26) == nil)
+        #expect(gate.update(with: recognized(.fiveFingers), at: 0.40) == nil)
+    }
+
+    @Test func quickModeRearmsDuringMovementAfterABriefRelease() {
+        var gate = GestureGate(mode: .quick)
+        _ = gate.update(with: recognized(.twoFingers), at: 0)
+        for timestamp in [0.04, 0.08, 0.12, 0.18] {
+            #expect(gate.update(with: nil, at: timestamp, commandsAllowed: false) == nil)
+        }
+        #expect(gate.phase.stage == .listening)
+        #expect(gate.update(with: recognized(.twoFingers), at: 0.21) == .twoFingers)
+    }
+
+    @Test func motionBlocksAcceptanceButDoesNotCreateAPendingCommand() {
+        var gate = GestureGate(mode: .quick)
+        #expect(gate.update(with: recognized(.threeFingers), at: 0, commandsAllowed: false) == nil)
+        #expect(gate.update(with: recognized(.threeFingers), at: 0.03, commandsAllowed: false) == nil)
+        #expect(gate.update(with: recognized(.threeFingers), at: 0.06) == .threeFingers)
+    }
+
+    @Test func swipeEndpointCannotRelaunchItsFingerMapping() {
+        var gate = GestureGate(mode: .quick)
+        gate.consumeMotion(with: recognized(.fiveFingers), at: 0)
+        for index in 1...64 {
+            #expect(gate.update(with: recognized(.fiveFingers), at: Double(index) / 32) == nil)
+        }
+        #expect(gate.update(with: recognized(.twoFingers), at: 2.03) == nil)
+        #expect(gate.update(with: recognized(.twoFingers), at: 2.10) == .twoFingers)
+    }
+
+    @Test func unclassifiedSwipeAlsoConsumesItsEndpoint() {
+        var gate = GestureGate(mode: .quick)
+        gate.consumeMotion(with: nil, at: 0)
+        #expect(gate.update(with: recognized(.fiveFingers), at: 0.03) == nil)
+        #expect(gate.update(with: recognized(.fiveFingers), at: 0.20) == nil)
+        #expect(gate.update(with: nil, at: 0.23) == nil)
+        #expect(gate.update(with: nil, at: 0.37) == nil)
+        #expect(gate.update(with: recognized(.fiveFingers), at: 0.40) == .fiveFingers)
+    }
+
+    @Test func invalidTimestampsCannotPoisonTheGate() {
+        var gate = GestureGate(mode: .quick)
+        #expect(gate.update(with: recognized(.oneFinger), at: .nan) == nil)
+        #expect(gate.update(with: recognized(.oneFinger), at: .infinity) == nil)
+        #expect(gate.update(with: recognized(.oneFinger), at: 1) == .oneFinger)
+    }
+
     @Test func resettingQuickModeKeepsItsActivationMode() {
         var gate = GestureGate(mode: .quick)
         gate.reset()

@@ -232,24 +232,20 @@ final class AppModel {
         if isRecognitionActive && !isEditingBindings {
             let wasArmed = gestureGate.isArmed
             let motion = handMotionRecognizer.update(sample)
-            // In safe mode the fist is the wake gesture, so hand motion must not interrupt that wake hold. Once
-            // armed (or in Quick mode, where a command is held directly), movement cancels only the pending command.
-            if motion.suppressesStaticCommands && (activationMode == .quick || gestureGate.isArmed) {
-                gestureGate.cancelPendingCommand()
-            }
-            let canRunMotion = activationMode == .quick || wasArmed
+            let canRunMotion = activationMode == .quick || gestureGate.isArmed(at: sample.timestamp)
             if let gesture = motion.gesture, canRunMotion {
+                cancelPendingLaunch()
                 lastMotionGesture = MotionGestureDetection(gesture: gesture, detectedAt: Date())
                 performSystemAction(for: gesture)
-                // A dynamic action consumes the current safe wake, so another action needs another wake.
-                gestureGate.reset()
+                gestureGate.consumeMotion(with: classification, at: sample.timestamp)
             }
-            // Keep advancing the safe-mode wake while the hand is moving. Once armed, motion cancels only the
-            // pending command; Quick mode cancels its direct command hold immediately.
-            let canAdvanceStaticGate = !motion.suppressesStaticCommands
-                || (activationMode == .wakeThenCommand && !gestureGate.isArmed)
-            if canAdvanceStaticGate,
-               let command = gestureGate.update(with: classification, at: sample.timestamp) {
+            // Always advance time and release detection, even during a swipe. Only command acceptance is
+            // suppressed; skipping samples here used to prolong cooldowns and discard releases.
+            if let command = gestureGate.update(
+                with: classification, at: sample.timestamp,
+                commandsAllowed: !motion.suppressesStaticCommands
+            ) {
+                systemActionStatus = .idle
                 lastAcceptedCommand = GestureDetection(gesture: command, detectedAt: Date())
                 acceptedCommandCount += 1
                 openApplication(for: command)
@@ -260,7 +256,7 @@ final class AppModel {
             if !wasArmed && gestureGate.isArmed {
                 handMotionRecognizer.reset()
             }
-            gesturePhase = gestureGate.phase
+            if gesturePhase != gestureGate.phase { gesturePhase = gestureGate.phase }
         }
         frameRateMeter.record(sample.timestamp)
         trackingFramesPerSecond = frameRateMeter.framesPerSecond
@@ -288,8 +284,9 @@ final class AppModel {
     }
 
     private func openApplication(for gesture: GestureID) {
-        // Drop commands arriving during a launch rather than queuing a later surprise activation.
-        guard launchTask == nil, canEditBindings else { return }
+        guard canEditBindings else { return }
+        // A new selection supersedes an unfinished launch; never count a command and silently discard it.
+        cancelPendingLaunch()
         guard let application = configuration.application(for: gesture) else {
             applicationLaunchStatus = .unassigned(gesture)
             return

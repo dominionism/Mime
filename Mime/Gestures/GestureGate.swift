@@ -11,9 +11,9 @@ enum GestureGatePhase: Equatable, Sendable {
 /// Turns a stream of pose classifications into deliberate commands.
 ///
 /// In safe mode, a closed fist held for 0.6 seconds arms the gate for 3 seconds, then a command pose held for 0.4
-/// seconds emits once. Quick mode accepts a recognized command pose on its first frame. Both modes cool down for
-/// 2 seconds and wait until the pose has been released for 0.3 seconds before listening again. A missing hand,
-/// unrecognized pose, or gap between samples restarts whatever pose was being held.
+/// seconds emits once, then requires a 2-second cooldown and 0.3-second release. Quick mode accepts its first
+/// command immediately and latches it to avoid repeats. A different count needs only 0.06 seconds of consistent
+/// evidence; lowering the hand for 0.12 seconds allows the same count again.
 ///
 /// Time comes from each sample's timestamp, so the gate behaves the same in tests as it does with a live camera.
 struct GestureGate {
@@ -23,6 +23,9 @@ struct GestureGate {
     /// Quick mode skips the wake pose and accepts the first confident command classification.
     static let quickCommandHold = 0.0
     static let cooldownDuration = 2.0
+    static let quickMinimumInterval = 0.12
+    static let quickChangeHold = 0.06
+    static let quickReleaseHold = 0.12
     /// A command pose scoring below this counts as released.
     static let releaseScore = 0.6
     static let releaseHold = 0.3
@@ -35,6 +38,8 @@ struct GestureGate {
         case listening
         case armed(until: Double)
         case cooldown(command: GestureID, until: Double, releasedSince: Double?)
+        /// A swipe with no classified pose must consume its endpoint before static commands resume.
+        case motionCooldown(until: Double, releasedSince: Double?)
     }
 
     private(set) var phase = GestureGatePhase.listening(wakeProgress: 0)
@@ -50,6 +55,13 @@ struct GestureGate {
         return false
     }
 
+    /// Check the incoming sample's clock before dispatching a motion action, since update has not run yet.
+    func isArmed(at timestamp: Double) -> Bool {
+        guard timestamp.isFinite, let lastTimestamp, timestamp >= lastTimestamp,
+              case .armed(let deadline) = state else { return false }
+        return timestamp < deadline
+    }
+
     init(mode: GestureActivationMode = .wakeThenCommand) {
         self.mode = mode
     }
@@ -57,7 +69,12 @@ struct GestureGate {
     /// Processes the classification for one sample, or `nil` when the sample has no hand, and returns the command
     /// this sample completed, if any.
     @discardableResult
-    mutating func update(with classification: PoseClassification?, at timestamp: Double) -> GestureID? {
+    mutating func update(
+        with classification: PoseClassification?,
+        at timestamp: Double,
+        commandsAllowed: Bool = true
+    ) -> GestureID? {
+        guard timestamp.isFinite else { return nil }
         let previousTimestamp = lastTimestamp
         // A restarted or reset capture clock must not inherit an armed or cooling-down state. Treat the first sample
         // from the new clock as a fresh listening sample so a command can never bypass the wake gesture.
@@ -70,7 +87,7 @@ struct GestureGate {
         lastTimestamp = timestamp
         defer { phase = currentPhase(at: timestamp) }
 
-        if let pose = classification?.pose {
+        if let pose = classification?.pose, commandsAllowed || (mode == .wakeThenCommand && !isArmed && pose.isWake) {
             if !isContinuous || hold?.pose != pose {
                 hold = (pose, timestamp)
             }
@@ -83,9 +100,7 @@ struct GestureGate {
             if mode == .quick {
                 guard let hold, hold.pose.isCommand,
                       timestamp - hold.since >= Self.quickCommandHold else { return nil }
-                state = .cooldown(command: hold.pose, until: timestamp + Self.cooldownDuration, releasedSince: nil)
-                self.hold = nil
-                return hold.pose
+                return acceptQuick(hold.pose, at: timestamp)
             }
             guard let hold, hold.pose.isWake, timestamp - hold.since >= Self.wakeHold else { return nil }
             state = .armed(until: timestamp + Self.armedDuration)
@@ -104,7 +119,41 @@ struct GestureGate {
             self.hold = nil
             return hold.pose
 
+        case .motionCooldown(let deadline, let releasedSince):
+            if let pose = classification?.pose, pose.isCommand {
+                state = .cooldown(command: pose, until: deadline, releasedSince: nil)
+                hold = nil
+            } else {
+                let releaseStart = isContinuous ? releasedSince ?? timestamp : timestamp
+                if timestamp >= deadline, timestamp - releaseStart >= Self.quickReleaseHold {
+                    state = .listening
+                    hold = nil
+                } else {
+                    state = .motionCooldown(until: deadline, releasedSince: releaseStart)
+                }
+            }
+            return nil
+
         case .cooldown(let command, let deadline, let releasedSince):
+            if mode == .quick {
+                // A brief intermediate count while fingers unfold must not steal the next app selection.
+                if timestamp >= deadline, let hold, hold.pose.isCommand, hold.pose != command,
+                   timestamp - hold.since >= Self.quickChangeHold {
+                    return acceptQuick(hold.pose, at: timestamp)
+                }
+                // Only a neutral pose or absent hand rearms the same count. A different count takes the
+                // short stability path above; an ambiguous single frame cannot unlatch a held command.
+                let isNeutral = classification?.pose?.isCommand != true
+                    && (classification?.score(for: command) ?? 0) < Self.releaseScore
+                let releaseStart = isNeutral ? (isContinuous ? releasedSince ?? timestamp : timestamp) : nil
+                if let releaseStart, timestamp >= deadline, timestamp - releaseStart >= Self.quickReleaseHold {
+                    state = .listening
+                    hold = nil
+                } else {
+                    state = .cooldown(command: command, until: deadline, releasedSince: releaseStart)
+                }
+                return nil
+            }
             let isReleased = (classification?.score(for: command) ?? 0) < Self.releaseScore
             let releaseStart = isReleased ? (isContinuous ? releasedSince ?? timestamp : timestamp) : nil
             if let releaseStart, timestamp >= deadline, timestamp - releaseStart >= Self.releaseHold {
@@ -123,12 +172,24 @@ struct GestureGate {
         self = GestureGate(mode: mode)
     }
 
-    /// Cancels only the pose currently being stabilized, preserving a safe-mode armed window.
-    mutating func cancelPendingCommand() {
-        hold = nil
-        if let lastTimestamp {
-            phase = currentPhase(at: lastTimestamp)
+    /// Consume the pose used for a swipe so its stationary endpoint cannot reopen the mapped app.
+    mutating func consumeMotion(with classification: PoseClassification?, at timestamp: Double) {
+        reset()
+        guard mode == .quick, timestamp.isFinite else { return }
+        lastTimestamp = timestamp
+        let deadline = timestamp + Self.quickMinimumInterval
+        if let pose = classification?.pose, pose.isCommand {
+            state = .cooldown(command: pose, until: deadline, releasedSince: nil)
+        } else {
+            state = .motionCooldown(until: deadline, releasedSince: nil)
         }
+        phase = currentPhase(at: timestamp)
+    }
+
+    private mutating func acceptQuick(_ command: GestureID, at timestamp: Double) -> GestureID {
+        state = .cooldown(command: command, until: timestamp + Self.quickMinimumInterval, releasedSince: nil)
+        hold = nil
+        return command
     }
 
     private func currentPhase(at timestamp: Double) -> GestureGatePhase {
@@ -149,6 +210,9 @@ struct GestureGate {
             }
             let progress = min((timestamp - hold.since) / Self.commandHold, 1)
             return .armed(secondsLeft: secondsLeft, candidate: hold.pose, commandProgress: progress)
+
+        case .motionCooldown:
+            return .listening(wakeProgress: 0)
 
         case .cooldown(let command, let deadline, _):
             return .cooldown(command: command, secondsLeft: max(deadline - timestamp, 0))

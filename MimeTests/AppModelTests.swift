@@ -292,6 +292,65 @@ struct AppModelTests {
         #expect(model.lastAcceptedCommand?.gesture == .oneFinger)
     }
 
+    @Test func raisingTheHandDoesNotBlockAFingerCommand() async {
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized),
+                             handTracking: tracking, configurationStore: store,
+                             applicationLauncher: FakeApplicationLauncher(), systemActionExecutor: actions)
+        await model.toggleRecognition()
+        tracking.send(HandFixture(wrist: SIMD2(0.5, 0.25)).sample(.fist, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.5, 0.45)).sample(.threeFingers, at: 1.10))
+        await allowSampleTaskToRun()
+        #expect(model.lastAcceptedCommand?.gesture == .threeFingers)
+        #expect(model.acceptedCommandCount == 1)
+        #expect(actions.actions.isEmpty)
+    }
+
+    @Test func swipeEndpointDoesNotOpenAnotherApp() async {
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized),
+                             handTracking: tracking, configurationStore: store,
+                             applicationLauncher: FakeApplicationLauncher(), systemActionExecutor: actions)
+        await model.toggleRecognition()
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fist, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
+        for index in 1...64 {
+            tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15 + Double(index) / 32))
+        }
+        await allowSampleTaskToRun()
+        #expect(actions.actions == [.nextApplication])
+        #expect(model.acceptedCommandCount == 0)
+    }
+
+    @Test func successfulFingerCommandClearsAnEarlierMotionFailure() async {
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        actions.error = InputEventError.accessibilityNotAllowed
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized),
+                             handTracking: tracking, configurationStore: store,
+                             applicationLauncher: FakeApplicationLauncher(), systemActionExecutor: actions)
+        await model.toggleRecognition()
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fist, at: 1))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 1.15))
+        await allowSampleTaskToRun()
+        if case .failed = model.systemActionStatus {} else { Issue.record("Expected motion failure") }
+        for index in 1...12 {
+            tracking.send(HandPoseSample(timestamp: 1.15 + Double(index) / 32, hand: nil))
+        }
+        tracking.send(HandFixture().sample(.oneFinger, at: 1.60))
+        await allowSampleTaskToRun()
+        #expect(model.lastAcceptedCommand?.gesture == .oneFinger)
+        #expect(model.systemActionStatus == .idle)
+    }
+
     @Test func safeMotionShortcutConsumesAnExistingWake() async {
         let tracking = FakeHandTracking()
         let actions = FakeSystemActionExecutor()
@@ -333,6 +392,29 @@ struct AppModelTests {
 
         #expect(actions.actions.isEmpty)
         #expect(model.lastMotionGesture == nil)
+    }
+
+    @Test func safeMotionCannotRunAfterTheWakeDeadline() async {
+        let tracking = FakeHandTracking()
+        let actions = FakeSystemActionExecutor()
+        let model = AppModel(permissions: FakePermissionStatus(cameraAccess: .authorized),
+                             handTracking: tracking, configurationStore: FakeConfigurationStore(),
+                             applicationLauncher: FakeApplicationLauncher(), systemActionExecutor: actions)
+        await model.toggleRecognition()
+        for index in 0...20 {
+            tracking.send(HandFixture().sample(.fist, at: 1 + Double(index) / 32))
+        }
+        for index in 0...22 {
+            tracking.send(HandPoseSample(timestamp: 1.75 + Double(index) / 8, hand: nil))
+        }
+        // The last gate update is still armed, but the swipe crosses its 4.625-second deadline.
+        tracking.send(HandFixture(wrist: SIMD2(0.70, 0.5)).sample(.fist, at: 4.55))
+        tracking.send(HandFixture(wrist: SIMD2(0.40, 0.5)).sample(.fiveFingers, at: 4.70))
+        await allowSampleTaskToRun()
+
+        #expect(actions.actions.isEmpty)
+        #expect(model.lastMotionGesture == nil)
+        #expect(model.gesturePhase.stage == .listening)
     }
 
     @Test func motionGesturesWaitForRecognitionInsteadOfDiagnostics() async {

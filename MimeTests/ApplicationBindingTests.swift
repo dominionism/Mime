@@ -66,9 +66,7 @@ struct ApplicationBindingTests {
         let model = makeModel(tracking: tracking, store: store, launcher: launcher)
 
         await model.toggleRecognition()
-        for index in 0...20 {
-            tracking.send(HandFixture().sample(.threeFingers, at: 1 + Double(index) / 32))
-        }
+        tracking.send(HandFixture().sample(.threeFingers, at: 1))
         await drain()
 
         #expect(model.activationMode == .quick)
@@ -150,21 +148,34 @@ struct ApplicationBindingTests {
         #expect(model.applicationLaunchStatus == .failed(application: application, message: "App is unavailable"))
     }
 
-    @Test func commandsDuringAnOutstandingLaunchAreNotQueued() async throws {
-        let (model, tracking, launcher) = try boundModel()
+    @Test func newestSelectionSupersedesAnOutstandingLaunch() async throws {
+        let store = FakeConfigurationStore()
+        store.configuration.activationMode = .quick
+        let second = ApplicationTarget(bundleIdentifier: "com.example.Second",
+                                       fallbackURL: URL(fileURLWithPath: "/Applications/Second.app"), name: "Second")
+        try store.configuration.setApplication(application, for: .fiveFingers)
+        try store.configuration.setApplication(second, for: .threeFingers)
+        let tracking = FakeHandTracking()
+        let launcher = FakeApplicationLauncher()
         launcher.waitsForCompletion = true
+        let model = makeModel(tracking: tracking, store: store, launcher: launcher)
         await model.toggleRecognition()
-        sendSequence(tracking)
+        tracking.send(HandFixture().sample(.fiveFingers, at: 1))
         await drain()
-        sendRelease(tracking)
-        sendSequence(tracking, start: 10)
+        tracking.send(HandFixture().sample(.threeFingers, at: 1.20))
+        tracking.send(HandFixture().sample(.threeFingers, at: 1.27))
         await drain()
         #expect(model.acceptedCommandCount == 2)
-        #expect(launcher.applications == [application])
+        #expect(launcher.applications == [application, second])
+        #expect(model.applicationLaunchStatus == .opening(second))
+
+        // The old system launch may finish despite cancellation. Its completion must not overwrite the new one.
         launcher.completeNext()
         await drain()
-        #expect(launcher.applications == [application])
-        #expect(model.applicationLaunchStatus == .opened(application))
+        #expect(model.applicationLaunchStatus == .opening(second))
+        launcher.completeNext()
+        await drain()
+        #expect(model.applicationLaunchStatus == .opened(second))
     }
 
     @Test func stoppedRecognitionIgnoresLateLaunchCompletion() async throws {
